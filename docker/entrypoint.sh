@@ -56,20 +56,63 @@ fi
 # on the same one.
 echo "Listen ${PORT}" > /etc/apache2/ports.conf
 
-# Apache will not start with more or less than one MPM loaded, and mod_php needs it to be prefork.
-# The image is built to guarantee that, so this only reports what is actually loaded and stops with
-# a clear reason if it is ever wrong - otherwise the only clue in the deployment log would be
-# "AH00534: More than one MPM loaded" and an immediate crash.
-LAB_MPM="$(apache2ctl -M 2>/dev/null | grep -oE 'mpm_[a-z]+_module' | tr '\n' ' ' | sed 's/ $//')"
+# Apache refuses to start when more than one Multi-Processing Module is loaded, and PHP runs here
+# as mod_php, which is not thread-safe and so needs prefork:
+#
+#     AH00534: apache2: Configuration error: More than one MPM loaded.
+#
+# The image is built with prefork alone and asserts it, but the state the container actually starts
+# with has been seen to disagree with the state the build ended with. Rather than trust it, the
+# MPM is put right here, before Apache is started, whatever it happens to be on arrival.
+#
+# The enabled MPMs are read from the module symlinks rather than from apache2ctl, because once two
+# are loaded apache2ctl cannot parse the configuration at all: it prints AH00534 and no module
+# list, which reads as "none" and hides the real problem.
+lab_enabled_mpms() {
+	ls -1 /etc/apache2/mods-enabled/ 2>/dev/null \
+		| sed -n 's/^\(mpm_[a-z]*\)\.load$/\1/p' \
+		| sort | tr '\n' ' ' | sed 's/ $//'
+}
 
-if [ "$LAB_MPM" != "mpm_prefork_module" ]; then
+LAB_MPM_BEFORE="$(lab_enabled_mpms)"
+
+if [ "$LAB_MPM_BEFORE" != "mpm_prefork" ]; then
+	echo "[lab-entrypoint] Apache MPMs on startup: '${LAB_MPM_BEFORE:-none}'. Correcting to prefork."
+fi
+
+# a2dismod declines to act in some states, so the symlinks are removed directly afterwards; that
+# is what Apache actually reads.
+for lab_mpm in mpm_event mpm_worker; do
+	a2dismod "$lab_mpm" >/dev/null 2>&1 || true
+	rm -f "/etc/apache2/mods-enabled/$lab_mpm.load" "/etc/apache2/mods-enabled/$lab_mpm.conf"
+done
+
+a2enmod mpm_prefork >/dev/null 2>&1 || true
+
+if [ ! -e /etc/apache2/mods-enabled/mpm_prefork.load ]; then
+	ln -sf ../mods-available/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.load
+	[ -e /etc/apache2/mods-available/mpm_prefork.conf ] \
+		&& ln -sf ../mods-available/mpm_prefork.conf /etc/apache2/mods-enabled/mpm_prefork.conf
+fi
+
+LAB_MPM_AFTER="$(lab_enabled_mpms)"
+
+if [ "$LAB_MPM_AFTER" != "mpm_prefork" ]; then
 	echo "[lab-entrypoint] ERROR: Apache must load exactly one MPM, and mod_php needs prefork." >&2
-	echo "[lab-entrypoint] Loaded instead: '${LAB_MPM:-none}'." >&2
+	echo "[lab-entrypoint] Enabled after correcting: '${LAB_MPM_AFTER:-none}'." >&2
+	ls -l /etc/apache2/mods-enabled/ | grep -i mpm >&2 || true
+	exit 1
+fi
+
+# With the MPM settled the configuration must parse, or Apache would only fail after this script
+# hands over and the reason would be lost among the server's own output.
+if ! apache2ctl -t >/dev/null 2>&1; then
+	echo "[lab-entrypoint] ERROR: the Apache configuration is not valid." >&2
 	apache2ctl -t >&2 2>&1 || true
 	exit 1
 fi
 
-echo "[lab-entrypoint] Apache MPM: $LAB_MPM."
+echo "[lab-entrypoint] Apache MPM: $(apache2ctl -M 2>/dev/null | grep -oE 'mpm_[a-z]+_module')."
 
 # Prepare the database, the configuration, the map data and the owner account.
 php "$APP_ROOT/docker/lab-init.php"
