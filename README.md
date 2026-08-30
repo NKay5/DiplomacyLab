@@ -15,6 +15,14 @@ The adjudicator, the map, the order interface and the results display are webDip
 are not modified. See `doc/diplomacyLab.txt` for the architecture, the JSON position format and
 the API.
 
+### Running it on your Mac
+
+Diplomacy Lab runs on your own Mac with **Docker Desktop as the only thing you install**. Unpack
+the folder, right-click `mac/Diplomacy Lab` and choose Open, and it builds itself, starts, and
+opens in your browser. After that it is a double-click, with no Terminal and no password.
+
+Full instructions: [doc/DIPLOMACY_LAB_MAC.md](doc/DIPLOMACY_LAB_MAC.md).
+
 ### Putting it online
 
 Diplomacy Lab is built to be deployed straight from GitHub to Railway as a single private,

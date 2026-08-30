@@ -7,12 +7,13 @@
 FROM php:8.4-apache
 
 # webDiplomacy needs gd for the map rendering, mysqli for the database, and gmp/bcmath for the
-# scoring maths. zip is here so Composer can install without shelling out to unzip.
+# scoring maths. zip is here so Composer can install without shelling out to unzip. There is
+# deliberately no MySQL client: docker/lab-init.php runs the install script through mysqli itself.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
-        libgmp-dev libzip-dev default-mysql-client; \
+        libgmp-dev libzip-dev; \
     docker-php-ext-configure gd --with-freetype --with-jpeg; \
     docker-php-ext-install -j"$(nproc)" gd mysqli gmp bcmath zip opcache; \
     apt-get clean; \

@@ -6,11 +6,17 @@ vendor
 cache
 mapstore
 datc/maps
+# Compiled variant data is built against a particular database. Shipping a copy from whatever
+# machine did the build would leave the image thinking the map was already installed, and a fresh
+# database would end up with no territories at all.
+variants/*/cache
 errorlog
 errorlogs
 orderlog
 orderlogs
 config.php
+# The macOS launcher apps belong on the user's Mac, not inside the container.
+mac
 *.md
 !README.md
 doc/*.png

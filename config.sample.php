@@ -518,5 +518,14 @@ class Config
 	 * @var string
 	 */
 	public static $labOwnerUsername = '';
+
+	/**
+	 * Whether this Lab runs privately on the user's own machine, published on 127.0.0.1 only.
+	 *
+	 * A local Lab cannot be reached from anywhere else, so it asks for no password. A Lab that is
+	 * reachable over a network must leave this false, so that the owner's credentials are required.
+	 * @var bool
+	 */
+	public static $labLocalMode = false;
 }
 ?>

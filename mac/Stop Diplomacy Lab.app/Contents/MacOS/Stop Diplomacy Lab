@@ -1,0 +1,36 @@
+#!/bin/bash
+# Stops Diplomacy Lab.
+#
+# Uses "docker compose stop", which shuts the two containers down and leaves everything else
+# alone. It never runs "down -v", so the volume holding your positions is never touched.
+
+set -u
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+for candidate in "$SELF_DIR/../../../lab-common.sh" "$SELF_DIR/../Resources/lab-common.sh"; do
+	if [ -f "$candidate" ]; then . "$candidate"; break; fi
+done
+
+if ! command -v lab_find_project >/dev/null 2>&1; then
+	/usr/bin/osascript -e 'display dialog "Diplomacy Lab is missing part of itself. Copy the whole Diplomacy Lab folder again." with title "Diplomacy Lab" buttons {"OK"} default button "OK" with icon stop' >/dev/null 2>&1
+	exit 1
+fi
+
+PROJECT="$(lab_find_project)"
+if [ -z "${PROJECT:-}" ]; then exit 1; fi
+
+cd "$PROJECT" || exit 1
+
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+	# Docker is not running, so neither is Diplomacy Lab.
+	lab_notify "Diplomacy Lab is already stopped."
+	exit 0
+fi
+
+if docker compose -f "$LAB_COMPOSE_FILE" stop >/dev/null 2>&1; then
+	lab_notify "Diplomacy Lab stopped. Your positions are kept."
+else
+	lab_alert "Diplomacy Lab could not be stopped. You can stop the containers from Docker Desktop instead."
+	exit 1
+fi

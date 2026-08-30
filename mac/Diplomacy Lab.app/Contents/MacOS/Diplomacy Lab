@@ -1,0 +1,65 @@
+#!/bin/bash
+# Diplomacy Lab launcher.
+#
+# Double-clicking this app starts Docker Desktop if it is not already running, starts Diplomacy
+# Lab and its database, waits until the Lab really answers, and opens it in the browser. No
+# Terminal, and nothing to type.
+
+set -u
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# The shared helpers live in the project's mac/ folder, which is three levels above this script
+# when the app is kept there, or beside the app once it has been copied elsewhere.
+for candidate in "$SELF_DIR/../../../lab-common.sh" "$SELF_DIR/../Resources/lab-common.sh"; do
+	if [ -f "$candidate" ]; then . "$candidate"; break; fi
+done
+
+if ! command -v lab_find_project >/dev/null 2>&1; then
+	/usr/bin/osascript -e 'display dialog "Diplomacy Lab is missing part of itself. Copy the whole Diplomacy Lab folder again." with title "Diplomacy Lab" buttons {"OK"} default button "OK" with icon stop' >/dev/null 2>&1
+	exit 1
+fi
+
+PROJECT="$(lab_find_project)"
+if [ -z "${PROJECT:-}" ]; then exit 1; fi
+
+cd "$PROJECT" || exit 1
+
+lab_ensure_docker || exit 1
+
+# If the Lab is already up, just bring it to the front.
+if curl -fsS --max-time 3 "$LAB_URL/health.php" >/dev/null 2>&1; then
+	open "$LAB_URL/lab.php"
+	exit 0
+fi
+
+lab_notify "Starting Diplomacy Lab…"
+
+# The first run builds the image, which takes a few minutes; later runs are quick. Output goes to
+# a log rather than the screen, so nothing that looks like a Terminal ever appears.
+LOG="$LAB_SETTINGS_DIR/last-launch.log"
+mkdir -p "$LAB_SETTINGS_DIR"
+
+if ! docker compose -f "$LAB_COMPOSE_FILE" up -d --build > "$LOG" 2>&1; then
+	lab_alert "Diplomacy Lab could not start.\n\nThe details are in:\n$LOG"
+	exit 1
+fi
+
+# Wait for the Lab itself to answer, not merely for the containers to exist. The first run has to
+# build the database, so allow several minutes.
+WAITED=0
+until curl -fsS --max-time 3 "$LAB_URL/health.php" >/dev/null 2>&1; do
+	if [ "$WAITED" -ge 420 ]; then
+		docker compose -f "$LAB_COMPOSE_FILE" logs --tail 80 >> "$LOG" 2>&1
+		lab_alert "Diplomacy Lab started but did not become ready.\n\nThe details are in:\n$LOG"
+		exit 1
+	fi
+
+	[ "$WAITED" = 60 ] && lab_notify "Still setting up. The first start takes a few minutes."
+
+	sleep 3
+	WAITED=$((WAITED + 3))
+done
+
+lab_notify "Diplomacy Lab is ready."
+open "$LAB_URL/lab.php"

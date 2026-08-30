@@ -1,0 +1,77 @@
+# Diplomacy Lab on your own Mac.
+#
+# Two containers and nothing else: Diplomacy Lab itself, and the MariaDB it stores your positions
+# in. Docker Desktop is the only thing you need installed; PHP, Apache, MariaDB and Composer all
+# live inside the containers.
+#
+# Start and stop it by double-clicking "Diplomacy Lab.app" and "Stop Diplomacy Lab.app". If you
+# ever want to do it by hand instead:
+#
+#   docker compose -f docker-compose.local.yml up -d
+#   docker compose -f docker-compose.local.yml stop
+#
+# Your data lives in the named volume below, which is kept when the containers stop, when Docker
+# Desktop quits and when the Mac restarts. Only "docker compose ... down -v" would remove it, and
+# neither of the two apps ever does that.
+
+name: diplomacy-lab
+
+services:
+  db:
+    image: mariadb:10.6
+    container_name: diplomacy-lab-db
+    restart: unless-stopped
+    environment:
+      # This password is not a secret to protect. The database has no published port, so it can
+      # only be reached from Diplomacy Lab's own private Docker network - not from your Mac, your
+      # home network or the internet. Keeping it fixed means the stack can never end up with a
+      # password that no longer matches the stored data.
+      MARIADB_DATABASE: diplomacylab
+      MARIADB_USER: diplomacylab
+      MARIADB_PASSWORD: diplomacylab-local
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      # Everything you create - positions, orders, results, the owner account and this
+      # installation's signing secret - is kept here, outside the containers.
+      - diplomacy-lab-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: diplomacy-lab:local
+    container_name: diplomacy-lab
+    restart: unless-stopped
+    ports:
+      # Bound to 127.0.0.1 on purpose: Diplomacy Lab is reachable from this Mac and from nowhere
+      # else. Without the 127.0.0.1 prefix Docker would publish it to the whole local network.
+      - "127.0.0.1:43080:8080"
+    environment:
+      # Private to this machine, so there is no password to set up or type.
+      LAB_LOCAL_MODE: "1"
+      LAB_ADMIN_USER: owner
+      LAB_DB_HOST: db
+      LAB_DB_PORT: "3306"
+      LAB_DB_NAME: diplomacylab
+      LAB_DB_USER: diplomacylab
+      LAB_DB_PASSWORD: diplomacylab-local
+      PORT: "8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8080/health.php') !== false ? 0 : 1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+volumes:
+  diplomacy-lab-db:
+    name: diplomacy-lab-db

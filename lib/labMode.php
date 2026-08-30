@@ -74,6 +74,49 @@ class libLabMode
 	}
 
 	/**
+	 * Whether this Lab is running privately on the user's own machine.
+	 *
+	 * A local Lab is published on 127.0.0.1 only (see docker-compose.local.yml), so it cannot be
+	 * reached from anywhere else and there is no password to type. Everywhere else the Lab is on
+	 * the open internet and the owner's credentials are required for every request.
+	 *
+	 * @return bool
+	 */
+	public static function isLocal()
+	{
+		return ( self::isEnabled() && isset(Config::$labLocalMode) && Config::$labLocalMode );
+	}
+
+	/**
+	 * Whether this request arrived at a name that only resolves on the machine itself.
+	 *
+	 * The container cannot see the real client address, because Docker rewrites it when it
+	 * publishes a port, so the loopback publish in docker-compose.local.yml is what actually keeps
+	 * a local Lab private. This is a second line of defence: if a local-mode Lab is ever published
+	 * more widely by mistake, requests arriving under any other name are still refused.
+	 *
+	 * @return bool
+	 */
+	private static function requestIsLoopback()
+	{
+		if( !isset($_SERVER['HTTP_HOST']) ) return false;
+
+		$host = strtolower($_SERVER['HTTP_HOST']);
+
+		// Drop the port, and the brackets IPv6 literals are written with
+		if( ($colon = strrpos($host, ':')) !== false && strpos($host, ']') !== strlen($host)-1 )
+		{
+			$beforeColon = substr($host, 0, $colon);
+			if( strpos($beforeColon, ':') === false || substr($beforeColon, -1) === ']' )
+				$host = $beforeColon;
+		}
+
+		$host = trim($host, '[]');
+
+		return in_array($host, array('127.0.0.1', 'localhost', '::1', '0:0:0:0:0:0:0:1'));
+	}
+
+	/**
 	 * The owner's username, as configured for this deployment.
 	 *
 	 * @return string
@@ -144,15 +187,25 @@ class libLabMode
 		if( $owner === '' )
 			self::refuse(503, 'Diplomacy Lab is not configured.');
 
-		$authenticated = self::authenticatedUsername();
+		if( self::isLocal() )
+		{
+			// Private to this machine: the loopback publish is the boundary, so there is no
+			// password. Requests arriving under any other name are refused all the same.
+			if( !self::requestIsLoopback() )
+				self::refuse(403, 'Forbidden.');
+		}
+		else
+		{
+			$authenticated = self::authenticatedUsername();
 
-		// Fail closed: if the web server is not asking for credentials, something is misconfigured
-		// and the Lab would otherwise be open to anyone who found the URL.
-		if( $authenticated === '' )
-			self::refuse(503, 'Diplomacy Lab is not configured.');
+			// Fail closed: if the web server is not asking for credentials, something is
+			// misconfigured and the Lab would otherwise be open to anyone who found the URL.
+			if( $authenticated === '' )
+				self::refuse(503, 'Diplomacy Lab is not configured.');
 
-		if( !hash_equals($owner, $authenticated) )
-			self::refuse(403, 'Forbidden.');
+			if( !hash_equals($owner, $authenticated) )
+				self::refuse(403, 'Forbidden.');
+		}
 
 		// From here the request is the owner's. AJAX requests do not load $User and are authorized
 		// by their own signed order tokens, so they stop here.
