@@ -56,6 +56,21 @@ fi
 # on the same one.
 echo "Listen ${PORT}" > /etc/apache2/ports.conf
 
+# Apache will not start with more or less than one MPM loaded, and mod_php needs it to be prefork.
+# The image is built to guarantee that, so this only reports what is actually loaded and stops with
+# a clear reason if it is ever wrong - otherwise the only clue in the deployment log would be
+# "AH00534: More than one MPM loaded" and an immediate crash.
+LAB_MPM="$(apache2ctl -M 2>/dev/null | grep -oE 'mpm_[a-z]+_module' | tr '\n' ' ' | sed 's/ $//')"
+
+if [ "$LAB_MPM" != "mpm_prefork_module" ]; then
+	echo "[lab-entrypoint] ERROR: Apache must load exactly one MPM, and mod_php needs prefork." >&2
+	echo "[lab-entrypoint] Loaded instead: '${LAB_MPM:-none}'." >&2
+	apache2ctl -t >&2 2>&1 || true
+	exit 1
+fi
+
+echo "[lab-entrypoint] Apache MPM: $LAB_MPM."
+
 # Prepare the database, the configuration, the map data and the owner account.
 php "$APP_ROOT/docker/lab-init.php"
 

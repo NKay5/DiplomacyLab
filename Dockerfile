@@ -44,5 +44,28 @@ RUN mkdir -p cache mapstore datc/maps variants/Classic/cache errorlog orderlog; 
 ENV PORT=8080
 EXPOSE 8080
 
+# The virtual host includes this file, and the entrypoint rewrites it on startup with the access
+# rule that suits wherever the Lab is running. Creating it here means the configuration is complete
+# and can be tested at build time, and denying everything means a Lab whose entrypoint somehow did
+# not write it refuses requests rather than serving them to anyone.
+RUN printf 'Require all denied\n' > /etc/apache2/lab-access.conf
+
+# PHP runs here as mod_php, which is not thread-safe, so Apache has to use the prefork MPM. Apache
+# also refuses to start at all when more than one MPM is loaded:
+#
+#     AH00534: apache2: Configuration error: More than one MPM loaded.
+#
+# The base image ships prefork on its own, but installing packages over it can leave Debian's
+# default MPM enabled alongside it, and a2enmod will not undo that by itself. So rather than trust
+# the inherited state, the MPM is chosen explicitly here and the result is then proved: exactly one
+# MPM loaded, and the whole configuration parses. If a future base image or package ever loads a
+# second one, this fails the build rather than the deployment.
+RUN set -eux; \
+    a2dismod mpm_event mpm_worker || true; \
+    a2enmod mpm_prefork; \
+    apache2ctl -M 2>/dev/null | grep -E 'mpm_[a-z]+_module'; \
+    test "$(apache2ctl -M 2>/dev/null | grep -c 'mpm_[a-z]*_module')" = '1'; \
+    apache2ctl -t
+
 ENTRYPOINT ["/usr/local/bin/lab-entrypoint"]
 CMD ["apache2-foreground"]
