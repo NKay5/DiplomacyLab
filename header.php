@@ -197,6 +197,7 @@ header("Expires: 0", false);
 header("X-Frame-Options: SAMEORIGIN"); //@ibarrionuevo
 
 require_once(l_r('lib/auth.php'));
+require_once(l_r('lib/labMode.php'));
 
 if( !defined('AJAX') )
 {
@@ -210,6 +211,10 @@ if( !defined('AJAX') )
 
 	global $User;
 	$User = libAuth::auth();
+
+	// Diplomacy Lab deployments are private to one person: check the request is theirs, sign them
+	// in, and keep them to the pages the Lab uses. Does nothing on a normal webDiplomacy install.
+	libLabMode::enforce();
 
 	if ( $User->type['Admin'] )
 	{
@@ -235,6 +240,8 @@ if( !defined('AJAX') )
 
 	}
 }
+if( defined('AJAX') ) libLabMode::enforce();
+
 if( Config::isOnPlayNowDomain() && !defined('PLAYNOW') )
 {
 	require_once('lib/home.php');

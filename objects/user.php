@@ -822,7 +822,7 @@ class User {
 			// Cookie code used to be a 32 bit int, now a 128 bit hex string is generated, but old int based cookie codes
 			// should still be collected if given
 			$cookieCode = md5("".rand(1,pow(2,32)).rand(1,pow(2,32)).rand(1,pow(2,32)).rand(1,pow(2,32)).rand(1,pow(2,32)));//rand(2, 2000000000);
-			setcookie('wD_Code', $cookieCode,['expires'=>time()+365*7*24*60*60,'samesite'=>'Lax']);
+			setcookie('wD_Code', $cookieCode, libAuth::cookieOptions(['expires'=>time()+365*7*24*60*60,'samesite'=>'Lax']));
 		}
 		else
 		{

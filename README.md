@@ -15,6 +15,12 @@ The adjudicator, the map, the order interface and the results display are webDip
 are not modified. See `doc/diplomacyLab.txt` for the architecture, the JSON position format and
 the API.
 
+### Putting it online
+
+Diplomacy Lab is built to be deployed straight from GitHub to Railway as a single private,
+password-protected site, with no terminal and no local setup. The step-by-step, click-only
+procedure is in [doc/DIPLOMACY_LAB_ONLINE.md](doc/DIPLOMACY_LAB_ONLINE.md).
+
 ### Running it locally on macOS with Docker
 
 Docker Desktop is the only prerequisite; PHP and MySQL stay inside the containers.

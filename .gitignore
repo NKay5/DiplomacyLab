@@ -44,7 +44,8 @@ backup.flag
 beta/adsense.js
 beta/
 scratchpad/
-# Ignore working-notes markdown docs, but keep the READMEs and CLAUDE.md
+# Ignore working-notes markdown docs, but keep the READMEs, CLAUDE.md and the doc/ folder
 *.md
 !README.md
 !CLAUDE.md
+!doc/*.md

@@ -30,6 +30,14 @@ require_once(l_r('objects/mailer.php'));
 global $Mailer;
 $Mailer = new Mailer();
 
+// A Diplomacy Lab deployment has exactly one account, created by the deployment itself. Nobody
+// can register, whatever route they arrive by.
+if( !libLabMode::registrationAllowed() )
+{
+	libHTML::notice(l_t('Registration disabled'),
+		l_t("This is a private Diplomacy Lab; new accounts cannot be created."));
+}
+
 if ( $Misc->Panic )
 {
 	libHTML::notice(l_t('Registration disabled'),

@@ -41,17 +41,51 @@ class RedisInterface
 {
     private $redis;
 
+    /**
+     * Whether a Redis server is actually connected. When it is not, every method below becomes a
+     * no-op and reads return false.
+     *
+     * Redis is used here for caching, for hinting the gamemaster that a game is ready to process,
+     * and for publishing events to the SSE server. A Diplomacy Lab deployment has none of those:
+     * it resolves synchronously when the user presses RESOLVE, runs no gamemaster and no SSE
+     * server. Making Redis optional therefore removes an entire service from such a deployment,
+     * while a normal webDiplomacy install with Redis configured behaves exactly as before.
+     *
+     * @var bool
+     */
+    private $connected = false;
+
     public function __construct($host = '127.0.0.1', $port = 6379)
     {
-        if (!class_exists('Redis')) {
-            throw new Exception('Redis PHP extension is not installed');
+        // An empty host explicitly disables Redis
+        if (empty($host) || !class_exists('Redis')) {
+            return;
         }
-        $this->redis = new Redis();
-        $this->redis->connect($host, $port);
+
+        try {
+            $this->redis = new Redis();
+            $this->connected = @$this->redis->connect($host, $port, 1.0);
+        } catch (\Throwable $e) {
+            $this->connected = false;
+        }
+
+        if (!$this->connected) {
+            $this->redis = null;
+        }
+    }
+
+    /**
+     * Whether commands will actually reach a Redis server.
+     */
+    public function isConnected(): bool
+    {
+        return $this->connected;
     }
 
     public function set($key, $value, $expirySeconds = null): mixed
     {
+        if (!$this->connected) return false;
+
         if ($expirySeconds) {
             return $this->redis->set($key, $value, $expirySeconds);
         } else {
@@ -61,21 +95,29 @@ class RedisInterface
 
     public function get($key): mixed
     {
+        if (!$this->connected) return false;
+
         return $this->redis->get($key);
     }
 
     public function append($key, $value): mixed
     {
+        if (!$this->connected) return false;
+
         return $this->redis->append($key, $value);
     }
 
     public function delete($key): mixed
     {
+        if (!$this->connected) return false;
+
         return $this->redis->del($key);
     }
 
     public function publish($channel, $message): mixed
     {
+        if (!$this->connected) return false;
+
         return $this->redis->publish($channel, $message);
     }
     
@@ -86,6 +128,8 @@ class RedisInterface
 
     public function flushDB(): mixed
     {
+        if (!$this->connected) return false;
+
         return $this->redis->flushDB();
     }
 }

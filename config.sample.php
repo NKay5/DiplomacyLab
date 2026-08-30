@@ -502,5 +502,21 @@ class Config
 	 */
 	public static $redisHost = 'redis';
 	public static $redisPort = 6379;
+
+	/**
+	 * Diplomacy Lab: run this install as one person's private analysis board rather than as a
+	 * webDiplomacy server. See lib/labMode.php and doc/DIPLOMACY_LAB_ONLINE.md.
+	 *
+	 * When true nobody can register, only the pages Diplomacy Lab uses are reachable, and every
+	 * request must be authenticated as $labOwnerUsername by the web server.
+	 * @var bool
+	 */
+	public static $labMode = false;
+
+	/**
+	 * The username of the single account a Lab deployment belongs to.
+	 * @var string
+	 */
+	public static $labOwnerUsername = '';
 }
 ?>

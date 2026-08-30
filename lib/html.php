@@ -740,7 +740,10 @@ class libHTML
 			$notice[]=$contents;
 		}
 
-		if ( ( time() - $Misc->LastProcessTime ) > Config::$downtimeTriggerMinutes*60 )
+		// A Diplomacy Lab runs no gamemaster on purpose - a position is only ever adjudicated when
+		// the user presses RESOLVE - so the "games are not being processed" warning is expected
+		// there and would only be confusing.
+		if ( !libLabMode::isEnabled() && ( time() - $Misc->LastProcessTime ) > Config::$downtimeTriggerMinutes*60 )
 			$notice[] = l_t("The last process time was over %s minutes ".
 				"ago (at %s); the server ".
 				"is not processing games until the cause is found and games are given extra time.",

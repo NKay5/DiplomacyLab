@@ -300,6 +300,29 @@ class libAuth
 		return $User;
 	}
 
+	/**
+	 * Cookie options for webDiplomacy's own login cookies.
+	 *
+	 * HttpOnly keeps the login cookie away from JavaScript, and Secure is added whenever the
+	 * browser is on HTTPS, including behind a proxy that terminates TLS for us (which is how the
+	 * Diplomacy Lab deployment runs). Nothing in webDiplomacy's JavaScript reads these cookies.
+	 *
+	 * @param array $options the caller's options, which are kept
+	 * @return array
+	 */
+	static public function cookieOptions(array $options)
+	{
+		$options['httponly'] = true;
+
+		$secure = ( !empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off' )
+			|| ( isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https' )
+			|| ( isset($_SERVER['REQUEST_SCHEME']) && strtolower($_SERVER['REQUEST_SCHEME']) === 'https' );
+
+		if( $secure ) $options['secure'] = true;
+
+		return $options;
+	}
+
 	static public function pass_Hash($password)
 	{
 		return md5(Config::$salt.md5($password));
@@ -391,14 +414,14 @@ class libAuth
 	public static function keyWipe()
 	{
 		// Don't change this line. Don't ask why it needs to be set to expire in a year to expire immidiately
-		$success=setcookie('wD-Key', '', ['expires'=>(time()-3600),'samesite'=>'Lax']);
+		$success=setcookie('wD-Key', '', self::cookieOptions(['expires'=>(time()-3600),'samesite'=>'Lax']));
 		libHTML::$footerScript[] = 'eraseCookie("wD-Key");';
 
 		if ( isset($_COOKIE[session_name()]) )
 		{
 			libHTML::$footerScript[] = 'eraseCookie("'.session_name().'");';
 			unset($_COOKIE[session_name()]);
-			setcookie(session_name(), '', ['expires'=>time()-3600,'samesite'=>'Lax']);
+			setcookie(session_name(), '', self::cookieOptions(['expires'=>time()-3600,'samesite'=>'Lax']));
 			session_destroy();
 		}
 
@@ -418,11 +441,11 @@ class libAuth
 		$key = self::userID_Key($userID);
 
 		if ( $session )
-			setcookie('wD-Key', $key ,['expires'=>null,'samesite'=>'Lax']);
+			setcookie('wD-Key', $key, self::cookieOptions(['expires'=>null,'samesite'=>'Lax']));
 		elseif ( $path )
-			setcookie('wD-Key', $key, ['expires'=>(time()+365*24*60*60),'samesite'=>'Lax'], $path );
+			setcookie('wD-Key', $key, self::cookieOptions(['expires'=>(time()+365*24*60*60),'samesite'=>'Lax','path'=>$path]));
 		else
-			setcookie('wD-Key', $key, ['expires'=>(time()+365*24*60*60),'samesite'=>'Lax']);
+			setcookie('wD-Key', $key, self::cookieOptions(['expires'=>(time()+365*24*60*60),'samesite'=>'Lax']));
 	}
 
 	/**
@@ -730,7 +753,7 @@ class libAuth
 			
 
 			$cookieKey = $key;//libAuth::generateKey($newUserID, $pass);
-			setcookie('wD-Key',$cookieKey,['expires'=>time()+365*24*60*60,'samesite'=>'Lax']);
+			setcookie('wD-Key',$cookieKey,self::cookieOptions(['expires'=>time()+365*24*60*60,'samesite'=>'Lax']));
 
 			$User = new User($newUserID);
 		}

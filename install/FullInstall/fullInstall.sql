@@ -2559,7 +2559,7 @@ INSERT INTO wD_Misc (`Name`,`Value`) VALUES ('BotGamesActiveNoPress',0);
 INSERT INTO wD_Misc (`Name`,`Value`) VALUES ('BotGamesActiveFvA',0);
 INSERT INTO wD_Misc (`Name`,`Value`) VALUES ('BotGamesActiveFullPress',0);
 
-ALTER TABLE `webdiplomacy`.`wD_BotGameQueue` ADD UNIQUE `gameID` (`gameID`);
+ALTER TABLE `wD_BotGameQueue` ADD UNIQUE `gameID` (`gameID`);
 
 DROP TABLE `wD_Backup_Log`;
 
