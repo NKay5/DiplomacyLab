@@ -1,0 +1,212 @@
+Diplomacy Lab
+=============
+
+Diplomacy Lab turns webDiplomacy into a free tactical analysis board, the way an online chess
+site turns a chess engine into an analysis board. You build any position you like, give every
+power its orders, adjudicate, look at the result, and step straight back to where you were.
+
+The guiding rule of the implementation is: reuse webDiplomacy, do not reimplement it. In
+particular the adjudicator is untouched, and remains the only source of truth for the rules.
+
+
+What the Lab reuses unchanged
+-----------------------------
+
+Almost everything the Lab needs already existed as part of webDiplomacy's sandbox games:
+
+  * The position editor. javascript/canvasBoard.js is webDiplomacy's own click-a-province map
+    editor, written for gamecreateSandbox.php's "custom unit assignments". The Lab drives the
+    same script, so placing units looks and behaves exactly as it does when creating a sandbox.
+
+  * Geographic validation. gamecreateSandbox.php already refuses armies at sea, fleets in
+    landlocked provinces and two units in one province, and handles coast parents and children.
+    LabPosition::validate() applies the same rules, reading the map from wD_Territories so it
+    follows whatever the variant's own install script defined.
+
+  * Order entry for every power at once. board/orders/orderinterface.php drops its countryID
+    filter when isSandboxMode is set (see its load() method), so a sandbox board shows the orders
+    of all seven powers together, colour-coded by country.
+
+  * One Ready for all powers. The same file's writeOrderStatus() already readies every member of
+    a sandbox game at once.
+
+  * The adjudicator, the map, the arrows, the supports/convoys/bounces display, and the results.
+    None of these are modified in any way.
+
+  * Cloning and erasing boards: gamemaster/sandboxGame.php.
+
+  * Docker. docker-compose.yml is used as-is.
+
+
+What the Lab adds
+-----------------
+
+Four things were genuinely missing, and they are what the Lab code provides.
+
+1. An arbitrary year, season and phase.
+   In webDiplomacy the calendar is just wD_Games.turn. For Classic,
+   variants/Classic/variant.php maps turn to a date as
+       turn = (year - 1901) * 2 + (Autumn ? 1 : 0)
+   so choosing a year and season is only a matter of setting the turn.
+   LabPosition::turnFromYearSeason() does that conversion.
+
+2. Editing the position of a board that already exists.
+   gamecreateSandbox.php applies its custom assignments once, while creating the game.
+   LabPosition::applyToGame() does it to a live board, at any time.
+
+3. Immediate adjudication.
+   Readying orders normally just leaves a hint for the gamemaster cron. processLabGame::resolve()
+   readies every country that has orders this phase and calls processGame::process() directly.
+
+4. An exact reset point.
+   processGame::moveTurnBack() replays webDiplomacy's turn archives, which only goes back one
+   turn and depends on that history being intact. The Lab instead snapshots the position as JSON
+   immediately before adjudicating (wD_LabGames.snapshotJSON) and restores it by simply applying
+   that position again. RESET therefore returns to exactly the board you built.
+
+
+The one behavioural change, and why
+-----------------------------------
+
+processGame::changePhase() eliminates any country with no units and no supply centers
+(findSetDefeated()), and ends the game when only one country is left standing
+(checkForWinner()). When a game ends, processGame::process() deletes every unit on the board.
+
+In a lab that is wrong. A position with only France and Germany on the map has to keep working,
+and so does a single power practising against an empty board. processLabGame::changePhase()
+therefore reproduces the phase-transition half of the original exactly and skips only the
+defeat/victory half. Nothing in gamemaster/adjudicator/ or gamemaster/orders/ is touched, so the
+rules, and the DATC results, are unaffected.
+
+The other adjustment is the clock. The gamemaster picks up any game whose processTime has passed,
+and processGame::process() resets processTime to one phase length after each adjudication. A Lab
+board must never adjudicate itself while you are not looking, so processLabGame::freezeClock()
+pushes its process time ten years out after every change. Only pressing RESOLVE resolves a board.
+
+Note that pressing Ready inside the embedded board (rather than the Lab's RESOLVE button) will
+also adjudicate, via the ordinary sandbox path, but does not record a new reset point. RESOLVE is
+the button to use.
+
+
+Files
+-----
+
+Added:
+  objects/labPosition.php     The LabPosition class: the JSON position format, its validation,
+                              reading a position out of a game and writing one into a game.
+  gamemaster/labGame.php      processLabGame extends processSandboxGame: resolve, reset support,
+                              duplicate, the changePhase override and the clock freeze.
+  lib/lab.php                 libLab: the Lab's two tables, saved positions and reset snapshots.
+  lab.php                     The Lab page: home, position editor and orders view.
+  locales/English/lab.php     The Lab's markup and the editor's JavaScript.
+  install/DiplomacyLab/lab.sql  The Lab's schema.
+
+Modified:
+  api.php                     The lab/* API entries.
+  lib/html.php                A menu entry.
+  install/FullInstall/fullInstall.sql  The Lab's two tables.
+
+Deliberately untouched:
+  gamemaster/adjudicator/*, gamemaster/orders/*, gamemaster/game.php, board/*, map.php,
+  datc/*, variants/*.
+
+
+Database
+--------
+
+Two new tables, and no changes to any existing table:
+
+  wD_LabGames       One row per Lab board: its user-visible name, its owner, and snapshotJSON,
+                    the position as it stood immediately before the last RESOLVE.
+  wD_LabPositions   Positions the user has saved by name, as JSON.
+
+lib/lab.php creates both on demand (CREATE TABLE IF NOT EXISTS), so an existing database does not
+need to be migrated by hand.
+
+A Lab board is an ordinary webDiplomacy sandbox game: a row in wD_Games with
+sandboxCreatedByUserID set, and seven wD_Members rows all belonging to the one user. That is why
+the existing board, order interface and map all work with it unchanged.
+
+
+The JSON position format
+------------------------
+
+This is the format used by Export JSON, Import, saved positions and the reset snapshot. It is
+also the format an external program or model would produce to set up a position.
+
+  {
+    "format": "diplomacy-lab-position",
+    "formatVersion": 1,
+    "name": "France Germany Belgium test",
+    "variant": "Classic",
+    "variantID": 1,
+    "year": 1903,
+    "season": "Fall",
+    "phase": "Diplomacy",
+    "turn": 5,
+    "units": [
+      { "country": "France",  "countryID": 2, "type": "Army",  "territory": "Picardy",          "terrID": 26 },
+      { "country": "France",  "countryID": 2, "type": "Fleet", "territory": "English Channel",  "terrID": 61 },
+      { "country": "Germany", "countryID": 3, "type": "Army",  "territory": "Ruhr",             "terrID": 41 }
+    ],
+    "centers": [
+      { "country": "France",  "countryID": 2, "territory": "Paris",  "terrID": 27 },
+      { "country": "Germany", "countryID": 3, "territory": "Munich", "terrID": 40 }
+    ]
+  }
+
+Reading it is deliberately forgiving:
+
+  * Territories may be given as "territory" (by name) or "terrID" (by ID). Names are matched
+    case-insensitively and coasts are named as the variant names them, e.g.
+    "Spain (North Coast)".
+  * Countries may be given as "country" (by name) or "countryID". "Neutral" is accepted.
+  * The calendar may be given as "year" plus "season", or as a raw "turn". "turn" wins if both
+    are present. "Fall" and "Autumn" both mean the same season.
+  * "phase" accepts the Lab's names as well as webDiplomacy's: "Retreat" is "Retreats" and
+    "Adjustment" is "Builds".
+  * "centers" is optional. Any supply center not listed is neutral.
+  * Only geography is enforced. A power may have no units; unit counts need not match supply
+    center counts; the position need not be reachable in a real game.
+
+So the minimum a generator has to produce is:
+
+  {
+    "year": 1903, "season": "Fall", "phase": "Diplomacy",
+    "units": [ { "country": "France", "type": "Army", "territory": "Picardy" } ]
+  }
+
+
+API
+---
+
+The Lab page itself uses plain form posts, but the same operations are available over the API
+for scripting, at api.php?route=... . All of them check that the position belongs to the caller.
+
+  lab/create       GET  variantID, name          -> { gameID, name }
+  lab/position     GET  gameID                   -> the position, in the JSON format above
+  lab/setPosition  JSON gameID, position         -> the position as stored
+  lab/resolve      GET  gameID                   -> { gameID, turn, phase }
+  lab/reset        GET  gameID                   -> { gameID, turn, phase }
+  lab/duplicate    GET  gameID, name             -> { gameID, name }
+  lab/delete       GET  gameID                   -> { gameID }
+
+A headless "give me a position and orders, return the result" entry is not implemented, but the
+pieces it needs are all here: LabPosition to read and write the board, and processLabGame::resolve()
+to adjudicate. It would be a matter of creating a board, applying a position, writing the orders
+through the existing OrderInterface, resolving, and reading the position back.
+
+
+Phases
+------
+
+Diplomacy is complete. Retreats and Builds work through the same machinery, because the Lab
+leaves webDiplomacy's phase transitions alone: adjudicating a Diplomacy phase with dislodged
+units moves the board to Retreats by itself, and an autumn turn with a unit/supply-center
+difference moves it to Builds by itself, exactly as in a normal game.
+
+What is only partly there is *starting* a position directly in a Retreats phase. A freshly
+applied position has no dislodged units, so a Retreats phase set up from scratch has nothing to
+retreat. Builds set up from scratch works, because build and destroy orders are derived from the
+unit and supply-center counts, which the position defines. Reaching Retreats by resolving into it
+works in all cases.

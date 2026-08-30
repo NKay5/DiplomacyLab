@@ -2,7 +2,71 @@ Diplomacy is a popular turn based strategy game in which you battle to control E
  
 webDiplomacy lets you play Diplomacy online.
 
---- 
+---
+
+Diplomacy Lab
+-------------
+
+This fork adds **Diplomacy Lab**, a free tactical analysis board built on webDiplomacy's sandbox
+games: place any position you like on the Classic map, give every power its orders, adjudicate
+with one button, and step straight back to the position you started from.
+
+The adjudicator, the map, the order interface and the results display are webDiplomacy's own and
+are not modified. See `doc/diplomacyLab.txt` for the architecture, the JSON position format and
+the API.
+
+### Running it locally on macOS with Docker
+
+Docker Desktop is the only prerequisite; PHP and MySQL stay inside the containers.
+
+    git clone https://github.com/NKay5/DiplomacyLab.git
+    cd DiplomacyLab
+    docker run --rm -v "$PWD":/app -w /app composer:2 composer update --ignore-platform-reqs
+    docker compose --profile core up -d
+
+The first start builds the database and takes a few minutes. Watch it finish with:
+
+    tail -f gamemaster-entrypoint.txt
+
+Wait for the line `READY - webDiplomacy system initialized`, then:
+
+1. Register an account at http://localhost:43000/register.php . The confirmation e-mail is
+   caught locally, so with the sample config you can just use this link directly:
+   http://localhost:43000/register.php?emailToken=9513e6f6%7C1665482821%7Ctest%40test.com
+   (Start the `dev` profile as well &mdash; `docker compose --profile core --profile dev up -d`
+   &mdash; if you would rather read the mail at http://localhost:43001 .)
+2. Open **Diplomacy Lab** at http://localhost:43000/lab.php , or from the Games menu.
+
+### Using it
+
+* **New position** creates an empty board. Nothing is on it and every supply center is neutral.
+* **EDIT POSITION** is webDiplomacy's own map editor. Pick a power's colour, pick whether you are
+  placing a unit, a supply center or both, and click provinces. Clicking a coastal province that
+  already holds that power's army places a fleet. Pick *None* to empty a province. Choose the
+  year, season and phase here too, then press **APPLY POSITION**.
+* **ORDERS** is webDiplomacy's own board. Because a Lab board is a sandbox game, every power's
+  orders appear together and you enter them exactly as you would in a game.
+* **RESOLVE** readies every power and adjudicates immediately, with the original adjudicator.
+* **RESET** returns the board to exactly the position it was in before that adjudication, so you
+  can change one order and try again.
+* **Duplicate** makes an independent copy of the current position, for exploring variations side
+  by side. **Save**, **Export JSON** and **Import** move positions in and out.
+
+Nothing is enforced except the geography of the map: powers may have no units at all, unit counts
+need not match supply center counts, and supply centers may be left neutral.
+
+### Running the adjudicator test suite
+
+Diplomacy Lab does not modify the adjudicator, so the DATC suite should be unaffected. To confirm
+that on your own machine, log in and then:
+
+1. Make yourself an admin: http://localhost:43000/gamemaster.php?gameMasterSecret=
+2. Turn on maintenance mode:
+   http://localhost:43000/admincp.php?tab=Control%20Panel&actionName=maintenance#maintenance
+3. Run the suite: http://localhost:43000/datc.php?testID=101&batchTest=12345
+4. Turn maintenance mode back off.
+
+---
 
 install/README.txt - Installation information.
 

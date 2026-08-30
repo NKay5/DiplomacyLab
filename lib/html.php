@@ -661,7 +661,7 @@ class libHTML
 		}
 
 		print libHTML::prebody($title===FALSE ? l_t($pages[$scriptname]['name']) : $title,
-			$scriptname == 'botgamecreate.php' || $scriptname == 'gamecreateSandbox.php'). // Don't let robots into the account create page
+			$scriptname == 'botgamecreate.php' || $scriptname == 'gamecreateSandbox.php' || $scriptname == 'lab.php'). // Don't let robots into the account create page
 			'<body>'.libHTML::menu($pages, $scriptname);
 
 		print '<noscript><div class="content-notice">
@@ -953,6 +953,7 @@ class libHTML
 		$links['tournamentRegistration.php']=array('name'=>'Tournament Registration', 'inmenu'=>FALSE);
 		$links['botgamecreate.php']=array('name'=>'New Bot Game', 'inmenu'=>TRUE, 'title'=>"Start up a new bot game");
 		$links['gamecreateSandbox.php']=array('name'=>'New Sandbox Game', 'inmenu'=>TRUE, 'title'=>"Start up a new sandbox game");
+		$links['lab.php']=array('name'=>'Diplomacy Lab', 'inmenu'=>TRUE, 'title'=>"A free analysis board: place any position, order every power, adjudicate and reset");
 		$links['group.php']=array('name'=>'Relationships', 'inmenu'=>FALSE);
 		$links['status.php']=array('name'=>'Status', 'inmenu'=>false, 'title'=>"webDiplomacy.net status page");
 
@@ -1078,6 +1079,7 @@ class libHTML
 								<a href="gamecreate.php" title="Start up a new game">Start a New Game</a>
 								<a href="botgamecreate.php" title="Start up a new bots-only game">Start an AI/Bot Game</a>
 								<a href="gamecreateSandbox.php" title="Start up a new bots-only game">Start a Sandbox Game</a>
+								<a href="lab.php" title="A free analysis board: place any position, order every power, adjudicate and reset">Diplomacy Lab</a>
 								<a href="gamelistings.php?gamelistType=Active" title="View/Spectate games currently running">Active Games</a>
 								<!-- <a href="ghostRatings.php" title="Ghost Ratings Information">Ghost Ratings</a> -->
 								<a href="tournaments.php" title="Information about tournaments on webDiplomacy">Tournaments</a>

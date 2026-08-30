@@ -500,6 +500,182 @@ class SandboxDelete extends ApiEntry {
 	}
 }
 
+/*
+ * Diplomacy Lab API entries.
+ *
+ * Diplomacy Lab turns a webDiplomacy sandbox game into a free tactical analysis board. These
+ * entries all work on the same currency: a Lab position, in the JSON format documented in
+ * doc/diplomacyLab.txt. Everything checks ownership internally via processLabGame::loadGame().
+ *
+ * None of these entries contain adjudication logic. lab/resolve hands the position to
+ * processGame::process(), which is webDiplomacy's own unmodified adjudicator.
+ */
+class LabCreate extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/create', 'GET', '', array('variantID', 'name'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+		require_once(l_r('lib/lab.php'));
+
+		$args = $this->getArgs();
+		$variantID = isset($args['variantID']) && (int)$args['variantID'] > 0 ? (int)$args['variantID'] : 1;
+
+		$LabGame = processLabGame::createGame($variantID);
+
+		// A new Lab board starts completely empty: no units, no owned supply centers, Spring 1901.
+		// That is the blank canvas the Lab is for; the default 1901 opening position is one click
+		// away via the position editor if it is wanted.
+		$Position = new LabPosition($LabGame->Variant);
+		$Position->turn = 0;
+		$Position->phase = 'Diplomacy';
+		$LabGame->setPosition($Position);
+
+		$name = isset($args['name']) ? $args['name'] : '';
+		if( libLab::trimName($name) === '' ) $name = 'Position '.date('Y-m-d H:i');
+		libLab::registerGame($LabGame->id, $name);
+
+		return json_encode(array('gameID' => $LabGame->id, 'name' => libLab::trimName($name)));
+	}
+}
+
+class LabGetPosition extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/position', 'GET', '', array('gameID'), false);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+
+		$args = $this->getArgs();
+		$LabGame = processLabGame::loadGame((int)$args['gameID']);
+
+		return $LabGame->getPosition()->toJSON();
+	}
+}
+
+class LabSetPosition extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/setPosition', 'JSON', '', array('gameID', 'position'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+		require_once(l_r('lib/lab.php'));
+
+		$args = $this->getArgs();
+		$LabGame = processLabGame::loadGame((int)$args['gameID']);
+
+		if( !isset($args['position']) )
+			throw new RequestException('No position given.');
+
+		$Position = LabPosition::fromArray((array)$args['position'], $LabGame->variantID);
+		$LabGame->setPosition($Position);
+
+		// Editing the position invalidates any reset point: the position you just built is now the
+		// one RESET should come back to, and it will be snapshotted on the next RESOLVE.
+		libLab::saveSnapshot($LabGame->id, $Position);
+		libLab::touchGame($LabGame->id);
+
+		return $LabGame->getPosition()->toJSON();
+	}
+}
+
+class LabResolve extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/resolve', 'GET', '', array('gameID'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+		require_once(l_r('lib/lab.php'));
+
+		$args = $this->getArgs();
+		$LabGame = processLabGame::loadGame((int)$args['gameID']);
+
+		// Snapshot the position before adjudicating; this is what RESET restores.
+		libLab::saveSnapshot($LabGame->id, $LabGame->getPosition());
+
+		$LabGame->resolve();
+
+		libLab::touchGame($LabGame->id);
+
+		return json_encode(array(
+			'gameID' => $LabGame->id,
+			'turn' => (int)$LabGame->turn,
+			'phase' => $LabGame->phase
+		));
+	}
+}
+
+class LabReset extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/reset', 'GET', '', array('gameID'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+		require_once(l_r('lib/lab.php'));
+
+		$args = $this->getArgs();
+		$LabGame = processLabGame::loadGame((int)$args['gameID']);
+
+		$Position = libLab::loadSnapshot($LabGame->id);
+		if( $Position === false )
+			throw new RequestException('This position has not been resolved yet, so there is nothing to reset to.');
+
+		$LabGame->setPosition($Position);
+		libLab::touchGame($LabGame->id);
+
+		return json_encode(array(
+			'gameID' => $LabGame->id,
+			'turn' => (int)$LabGame->turn,
+			'phase' => $LabGame->phase
+		));
+	}
+}
+
+class LabDuplicate extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/duplicate', 'GET', '', array('gameID', 'name'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+		require_once(l_r('lib/lab.php'));
+
+		$args = $this->getArgs();
+		$LabGame = processLabGame::loadGame((int)$args['gameID']);
+
+		$Copy = $LabGame->duplicateGame();
+
+		$source = libLab::getGame($LabGame->id);
+		$name = isset($args['name']) && libLab::trimName($args['name']) !== ''
+			? $args['name']
+			: (($source ? $source['name'] : 'Position').' (copy)');
+
+		libLab::registerGame($Copy->id, $name);
+
+		return json_encode(array('gameID' => $Copy->id, 'name' => libLab::trimName($name)));
+	}
+}
+
+class LabDelete extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/delete', 'GET', '', array('gameID'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+		require_once(l_r('lib/lab.php'));
+
+		$args = $this->getArgs();
+		$gameID = (int)$args['gameID'];
+
+		// loadGame() enforces that the position belongs to this user before anything is erased
+		$LabGame = processLabGame::loadGame($gameID);
+
+		libLab::forgetGame($gameID);
+		$LabGame->deleteGame();
+
+		return json_encode(array('gameID' => $gameID));
+	}
+}
+
 /**
  * API entry players/active_games
  * *Multiplexed
@@ -2152,6 +2328,13 @@ try {
 	$api->load(new SandboxCopy());
 	$api->load(new SandboxMoveTurnBack());
 	$api->load(new SandboxDelete());
+	$api->load(new LabCreate());
+	$api->load(new LabGetPosition());
+	$api->load(new LabSetPosition());
+	$api->load(new LabResolve());
+	$api->load(new LabReset());
+	$api->load(new LabDuplicate());
+	$api->load(new LabDelete());
 
 	// Track API call metrics
 	$apiStartTime = microtime(true);
