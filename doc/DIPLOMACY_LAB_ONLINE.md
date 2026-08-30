@@ -168,6 +168,15 @@ service's healthcheck path in Railway if you want one; it is not required.
 * `install/FullInstall/fullInstall.sql` used to qualify one `ALTER TABLE` with the literal database
   name `webdiplomacy`, which broke installing into Railway's `railway` database. That qualifier has
   been removed so the script installs into whatever database it is run against.
+* **The install script is developed against MariaDB but may be given MySQL.** Five statements used
+  syntax MariaDB accepts and MySQL does not, and each one aborted the deploy in turn:
+  `CAST(... AS INT)` (MySQL needs `SIGNED`/`UNSIGNED`), two `GROUP BY` clauses that MySQL's
+  `only_full_group_by` rejects, a `'0000-00-00 00:00:00'` default that MySQL's strict mode rejects,
+  and `ALTER TABLE IF EXISTS`, which MySQL has no equivalent for and which is now done with a
+  prepared statement guarded on `information_schema`. Run
+  `php install/checkSqlCompatibility.php --host=... --user=... --password=... --database=...`
+  against a throwaway database after touching the install scripts: it runs every statement and
+  reports all the failures in one pass rather than stopping at the first.
 * `processSandboxGame::eraseGame()` compares the game's `sandboxCreatedByUserID`, which mysqli
   returns as a string, strictly against the integer `$User->id`, so it rejects even the creator.
   `processLabGame::deleteGame()` goes around it.

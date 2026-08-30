@@ -1557,8 +1557,8 @@ INSERT INTO wD_UserCodeConnections (userID, type, code, earliest, latest, count)
 SELECT userID, type, code , earliestRequest, latestRequest, requestCount
 FROM (
 	SELECT linkedId userId, 'FingerprintPro' type, 
-		FROM_BASE64(visitorId) code, FROM_UNIXTIME(CAST(LEFT(requestId,10) AS INT)) earliestRequest, 
-		FROM_UNIXTIME(CAST(LEFT(requestId,10) AS INT)) latestRequest, 
+		FROM_BASE64(visitorId) code, FROM_UNIXTIME(CAST(LEFT(requestId,10) AS UNSIGNED)) earliestRequest, 
+		FROM_UNIXTIME(CAST(LEFT(requestId,10) AS UNSIGNED)) latestRequest, 
 		1 requestCount
  	FROM wD_FingerprintProRequests f
 ) r
@@ -1780,7 +1780,9 @@ SELECT userID
 FROM (
 	SELECT userID, DAYOFWEEK(lastRequest)-1 d, HOUR(lastRequest) h, SUM(hits) c
 	FROM wD_AccessLog
-	GROUP BY userID, DAYOFWEEK(lastRequest), HOUR(lastRequest)
+	/* Grouped by the select aliases so the grouping matches the selected expressions exactly;
+	   MySQL's only_full_group_by rejects grouping by DAYOFWEEK(x) while selecting DAYOFWEEK(x)-1. */
+	GROUP BY userID, d, h
 ) rec
 ON DUPLICATE KEY UPDATE  
 	day0hour0  = day0hour0  + IF(d=0 AND h=0 ,c,0),
@@ -2200,7 +2202,7 @@ CREATE TABLE `wD_UserCodeConnections` (
 	`userID` MEDIUMINT(8) UNSIGNED NOT NULL,
 	`code` BINARY(16) NOT NULL,
 	`earliest` TIMESTAMP NOT NULL DEFAULT current_timestamp(),
-	`latest` TIMESTAMP NOT NULL DEFAULT '0000-00-00 00:00:00',
+	`latest` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	`count` INT(10) UNSIGNED NOT NULL DEFAULT 0,
 	`previousCount` INT(10) UNSIGNED NOT NULL DEFAULT 0,
 	`isNew` TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
@@ -2310,7 +2312,17 @@ CREATE TABLE IF NOT EXISTS `wD_UserConnections` (
 ) ENGINE=InnoDB ;
 
 -- Prevent full table scanes in phpBB like module
-ALTER TABLE IF EXISTS `phpbb_posts_likes` ADD INDEX `CountLikes` (`user_id`, `post_id`);
+/* phpBB's tables are only present when the forum integration is installed. ALTER TABLE IF EXISTS
+   is MariaDB-only, so the index is added through a prepared statement that both servers accept
+   and that simply does nothing when the table is absent. */
+SET @wdAddLikesIndex := (SELECT IF(
+	EXISTS(SELECT 1 FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'phpbb_posts_likes'),
+	'ALTER TABLE `phpbb_posts_likes` ADD INDEX `CountLikes` (`user_id`, `post_id`)',
+	'DO 0'));
+PREPARE wdAddLikesIndex FROM @wdAddLikesIndex;
+EXECUTE wdAddLikesIndex;
+DEALLOCATE PREPARE wdAddLikesIndex;
 
 ALTER TABLE `wD_UserOptions` ADD COLUMN `mapUI` enum('Point and click','Dropdown menus') NOT NULL DEFAULT 'Point and click';
 ALTER TABLE `wD_UserOptions` CHANGE COLUMN `displayUpcomingLive` `displayUpcomingLive` enum('No','Yes') NOT NULL DEFAULT 'No';
@@ -2536,7 +2548,7 @@ CREATE TABLE wD_BotGameQueue(
 );
 
 INSERT INTO wD_BotGameQueue ( userID, queuedTime, notifiedTime, startedTime, gameID, finishedTime )
-SELECT u.id, g.processTime, g.processTime, g.processTime, g.id, IF(g.gameOver='No' AND g.phase <> 'Finished',NULL,g.processTime) FROM wD_Members b INNER JOIN wD_Games g ON g.id = b.gameID INNER JOIN wD_Members m ON m.gameID = g.id INNER JOIN wD_Users u ON u.id = m.userID LEFT JOIN wD_ApiKeys a ON a.userID = u.id WHERE b.userID = 181048 AND a.userID IS NULL GROUP BY u.username, u.email, u.points;
+SELECT u.id, g.processTime, g.processTime, g.processTime, g.id, IF(g.gameOver='No' AND g.phase <> 'Finished',NULL,g.processTime) FROM wD_Members b INNER JOIN wD_Games g ON g.id = b.gameID INNER JOIN wD_Members m ON m.gameID = g.id INNER JOIN wD_Users u ON u.id = m.userID LEFT JOIN wD_ApiKeys a ON a.userID = u.id WHERE b.userID = 181048 AND a.userID IS NULL GROUP BY u.id, g.id;
 UPDATE wD_BotGameQueue bg INNER JOIN (SELECT gameID, MIN(timeSent) t FROM wD_GameMessages GROUP BY
 gameID) g ON g.gameID = bg.gameID SET bg.queuedTime = g.t, bg.notifiedTime = g.t, bg.startedTime = g.t;
 
