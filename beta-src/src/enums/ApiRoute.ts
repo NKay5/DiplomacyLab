@@ -17,6 +17,12 @@ enum ApiRoute {
   SANDBOX_COPY = "sandbox/copy",
   SANDBOX_MOVETURNBACK = "sandbox/moveTurnBack",
   SANDBOX_DELETE = "sandbox/delete",
+  // Diplomacy Lab: the board is the application, so it drives the position itself
+  LAB_EDIT_PROVINCE = "lab/editProvince",
+  LAB_RESOLVE = "lab/resolve",
+  LAB_RESET = "lab/reset",
+  LAB_DUPLICATE = "lab/duplicate",
+  LAB_SAVE = "lab/save",
 }
 
 export default ApiRoute;

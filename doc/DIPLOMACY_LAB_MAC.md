@@ -36,8 +36,14 @@ you to point at the DiplomacyLab folder; it remembers after that.
 Double-click **Diplomacy Lab**.
 
 It starts Docker Desktop if it is not already running, starts Diplomacy Lab, waits until it is
-really ready, and opens it at **http://127.0.0.1:43080/lab.php**. There is no password and nothing
-to type.
+really ready, and opens it at **http://127.0.0.1:43080/**. There is no password and nothing to
+type.
+
+That address opens straight onto the board, with the Lab's controls along the top of the map:
+**Edit position** to click units onto provinces, **Orders** to order them the way the board
+normally works, **Resolve** to adjudicate, and **Reset**, **Duplicate**, **Save** and **New**
+beside them. `lab.php` is still there for saved positions, JSON import and export, and setting
+the year and season.
 
 If it is already running, double-clicking just brings it back up in the browser.
 

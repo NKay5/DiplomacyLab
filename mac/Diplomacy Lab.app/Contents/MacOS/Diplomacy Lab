@@ -29,7 +29,7 @@ lab_ensure_docker || exit 1
 
 # If the Lab is already up, just bring it to the front.
 if curl -fsS --max-time 3 "$LAB_URL/health.php" >/dev/null 2>&1; then
-	open "$LAB_URL/lab.php"
+	open "$LAB_URL/"
 	exit 0
 fi
 
@@ -62,4 +62,4 @@ until curl -fsS --max-time 3 "$LAB_URL/health.php" >/dev/null 2>&1; do
 done
 
 lab_notify "Diplomacy Lab is ready."
-open "$LAB_URL/lab.php"
+open "$LAB_URL/"

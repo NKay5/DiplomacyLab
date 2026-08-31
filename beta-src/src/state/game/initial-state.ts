@@ -176,6 +176,16 @@ const initialState: GameState = {
   },
   activeGames: [],
   numConsecutiveGetFailures: 0,
+  lab: {
+    // Turned on by the page that opens the board when the game is a Lab position.
+    enabled: false,
+    mode: "orders",
+    tool: "unit",
+    countryID: 0,
+    unitType: "Auto",
+    busy: null,
+    error: null,
+  },
 };
 
 export default initialState;

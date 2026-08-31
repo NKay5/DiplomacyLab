@@ -655,6 +655,178 @@ class LabDuplicate extends ApiEntry {
 	}
 }
 
+/**
+ * API entry lab/editProvince
+ *
+ * One click on the board, applied to the position. The modern board sends the territory it was
+ * clicked on and what the user is currently placing; everything else - what a province may hold,
+ * one unit per province, coasts - is decided here by LabPosition, so the board does not have to
+ * know the rules of the map.
+ */
+class LabEditProvince extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/editProvince', 'GET', '', array('gameID', 'terrID', 'tool', 'countryID', 'unitType'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+		require_once(l_r('lib/lab.php'));
+
+		$args = $this->getArgs();
+		$LabGame = processLabGame::loadGame((int)$args['gameID']);
+
+		$Position = $LabGame->getPosition();
+
+		$terrID = (int)$args['terrID'];
+		$territories = $Position->territories();
+
+		if( !isset($territories[$terrID]) )
+			throw new RequestException('That territory is not part of this map.');
+
+		$provinceID = $Position->provinceID($terrID);
+		$countryID = (int)$args['countryID'];
+		$tool = isset($args['tool']) ? $args['tool'] : 'unit';
+		$unitType = isset($args['unitType']) ? $args['unitType'] : 'Auto';
+
+		// Every territory belonging to the clicked province: the province itself and its coasts.
+		$provinceTerrIDs = array($provinceID);
+		foreach($territories as $id => $territory)
+			if( $id != $provinceID && $Position->provinceID($id) == $provinceID )
+				$provinceTerrIDs[] = $id;
+
+		$unitInProvince = null;
+		foreach($Position->units as $unit)
+			if( in_array((int)$unit['terrID'], $provinceTerrIDs) ) $unitInProvince = $unit;
+
+		$removeUnitsInProvince = function() use (&$Position, $provinceTerrIDs) {
+			$kept = array();
+			foreach($Position->units as $unit)
+				if( !in_array((int)$unit['terrID'], $provinceTerrIDs) ) $kept[] = $unit;
+			$Position->units = $kept;
+		};
+
+		switch($tool)
+		{
+			case 'erase':
+				$removeUnitsInProvince();
+				break;
+
+			case 'center':
+			{
+				$centerTerrID = $Position->isSupplyCenter($provinceID) ? $provinceID : null;
+
+				if( is_null($centerTerrID) )
+					throw new RequestException('That province has no supply center.');
+
+				$kept = array();
+				foreach($Position->centers as $center)
+					if( (int)$center['terrID'] !== $centerTerrID ) $kept[] = $center;
+				$Position->centers = $kept;
+
+				// Country 0 means nobody: the supply center is left neutral.
+				if( $countryID > 0 )
+					$Position->centers[] = array('countryID'=>$countryID, 'terrID'=>$centerTerrID);
+
+				break;
+			}
+
+			default:
+			{
+				// Clicking with nobody selected clears the province, which is how a unit is removed
+				// without switching tool.
+				if( $countryID < 1 )
+				{
+					$removeUnitsInProvince();
+					break;
+				}
+
+				$armyTerrID = null;
+				$fleetTerrIDs = array();
+
+				foreach($provinceTerrIDs as $id)
+				{
+					if( is_null($armyTerrID) && $Position->canHoldUnit($id, 'Army') ) $armyTerrID = $id;
+					if( $Position->canHoldUnit($id, 'Fleet') ) $fleetTerrIDs[] = $id;
+				}
+				sort($fleetTerrIDs);
+
+				$type = $unitType;
+
+				if( $type !== 'Army' && $type !== 'Fleet' )
+				{
+					// Auto: an army wherever one can stand, except that clicking again on a coast
+					// which already holds this country's army turns it into a fleet.
+					$type = is_null($armyTerrID) ? 'Fleet' : 'Army';
+
+					if( $type === 'Army' && count($fleetTerrIDs)
+						&& $unitInProvince
+						&& $unitInProvince['type'] === 'Army'
+						&& (int)$unitInProvince['countryID'] === $countryID )
+						$type = 'Fleet';
+				}
+
+				if( $type === 'Army' && is_null($armyTerrID) )
+					throw new RequestException($territories[$provinceID]['name'].' cannot hold an army.');
+
+				if( $type === 'Fleet' && !count($fleetTerrIDs) )
+					throw new RequestException($territories[$provinceID]['name'].' cannot hold a fleet.');
+
+				$targetTerrID = ($type === 'Army') ? $armyTerrID : $fleetTerrIDs[0];
+
+				// A province with more than one coast takes several clicks to work through: placing
+				// a fleet where this country already has one moves it round to the next coast.
+				if( $type === 'Fleet' && count($fleetTerrIDs) > 1
+					&& $unitInProvince && $unitInProvince['type'] === 'Fleet'
+					&& (int)$unitInProvince['countryID'] === $countryID )
+				{
+					$current = array_search((int)$unitInProvince['terrID'], $fleetTerrIDs);
+					if( $current !== false )
+						$targetTerrID = $fleetTerrIDs[($current + 1) % count($fleetTerrIDs)];
+				}
+
+				$removeUnitsInProvince();
+				$Position->units[] = array('countryID'=>$countryID, 'type'=>$type, 'terrID'=>$targetTerrID);
+
+				break;
+			}
+		}
+
+		$LabGame->setPosition($Position);
+
+		// Editing the position makes it the point RESET returns to.
+		libLab::saveSnapshot($LabGame->id, $Position);
+		libLab::touchGame($LabGame->id);
+
+		return $LabGame->getPosition()->toJSON();
+	}
+}
+
+/**
+ * API entry lab/save
+ *
+ * Keep the position on the board under a name, so it can be opened again later.
+ */
+class LabSavePosition extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/save', 'GET', '', array('gameID', 'name'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('gamemaster/labGame.php'));
+		require_once(l_r('lib/lab.php'));
+
+		$args = $this->getArgs();
+		$LabGame = processLabGame::loadGame((int)$args['gameID']);
+
+		$labRecord = libLab::getGame($LabGame->id);
+		$name = isset($args['name']) && libLab::trimName($args['name']) !== ''
+			? $args['name']
+			: ($labRecord ? $labRecord['name'] : '');
+
+		$positionID = libLab::savePosition($LabGame->getPosition(), $name);
+
+		return json_encode(array('positionID' => $positionID, 'name' => libLab::trimName($name)));
+	}
+}
+
 class LabDelete extends ApiEntry {
 	public function __construct() {
 		parent::__construct('lab/delete', 'GET', '', array('gameID'), true);
@@ -1017,8 +1189,13 @@ class GetGamesStates extends ApiEntry {
 		    throw new ClientForbiddenException('Game ID is not in list of gameIDs where API usage is permitted.');
 
 		// Urgh this is appalling.. it's fetching the game and all associated records just to check the user/country, and then it fetches it all again in GameState
-		$game = $this->getAssociatedGame(); 
-		if ($countryID != null && (!isset($game->Members->ByUserID[$userID]) || $countryID != $game->Members->ByUserID[$userID]->countryID))
+		$game = $this->getAssociatedGame();
+		// Asked of the country, not of the user: Members->ByUserID holds one member per user, so in
+		// a sandbox game - where one user holds every country - it names whichever country happens
+		// to sort first, and that changes as supply centres change hands (see Members::load). Going
+		// through ByCountryID asks the question that was meant all along, and is the same test for
+		// an ordinary game, where a user holds one country.
+		if ($countryID != null && (!isset($game->Members->ByCountryID[$countryID]) || $game->Members->ByCountryID[$countryID]->userID != $userID))
 			throw new ClientForbiddenException('A user can only view game state for the country it controls.');
 		
 		$gameState = new \webdiplomacy_api\GameState(intval($gameID), $countryID ? intval($countryID) : null);
@@ -1411,7 +1588,10 @@ class GetGameData extends ApiEntry {
 					)
 				);
 			}
-			if (!isset($game->Members->ByUserID[$userID]) || $countryID != $game->Members->ByUserID[$userID]->countryID){
+			// Asked of the country rather than of the user, for the reason given in
+			// GetGamesStates: one user can hold every country in a sandbox game. This is also the
+			// index the line just below already uses to find the member.
+			if (!isset($game->Members->ByCountryID[$countryID]) || $game->Members->ByCountryID[$countryID]->userID != $userID){
 				throw new ClientForbiddenException(
 					$this->JSONResponse(
 						'A user can only view game state for the country it controls.',
@@ -1952,8 +2132,10 @@ class GetMessages extends ApiEntry {
 				$this->JSONResponse('A countryID is required.', '', false, ['countryID' => $countryID])
 			);
 
-		// Ensure the country ID matches the user ID making the request:
-		if (!isset($game->Members->ByUserID[$userID]) || $countryID != $game->Members->ByUserID[$userID]->countryID)
+		// Ensure the country ID matches the user ID making the request. Asked of the country rather
+		// than of the user, for the reason given in GetGamesStates: one user can hold every country
+		// in a sandbox game.
+		if (!isset($game->Members->ByCountryID[$countryID]) || $game->Members->ByCountryID[$countryID]->userID != $userID)
 			throw new ClientForbiddenException('A user can only view game messages for the country it controls.');
 
 		$where = "(toCountryID = $countryID OR fromCountryID = $countryID)";
@@ -1978,7 +2160,7 @@ class GetMessages extends ApiEntry {
 		$curTime = time();
 		$responseStr = $messages ? 'Successfully retrieved game messages.' : 'No messages available';
 		// error_log("$responseStr at time $curTime");
-		$newMessagesFrom = $countryID == 0 ? [] : array_map('intval', $game->Members->ByUserID[$userID]->newMessagesFrom);
+		$newMessagesFrom = $countryID == 0 ? [] : array_map('intval', $game->Members->ByCountryID[$countryID]->newMessagesFrom);
 		return $this->JSONResponse(
 			$responseStr,
 			'',
@@ -2335,6 +2517,8 @@ try {
 	$api->load(new LabReset());
 	$api->load(new LabDuplicate());
 	$api->load(new LabDelete());
+	$api->load(new LabEditProvince());
+	$api->load(new LabSavePosition());
 
 	// Track API call metrics
 	$apiStartTime = microtime(true);

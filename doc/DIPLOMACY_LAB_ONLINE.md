@@ -31,8 +31,27 @@ Safari will offer to remember the password, so you only type it once.
 
 ### Using it
 
-The address you generated is the Lab. Everything else on the site redirects there.
-There is no sign-up page and no second login.
+The address you generated is the Lab, and it opens straight onto the board. Everything else on
+the site redirects there. There is no sign-up page and no second login.
+
+The controls sit along the top of the map:
+
+- **Edit position** — click a province to put a unit on it or take one away. Land gives an army,
+  sea gives a fleet; click a coastal province again to turn its army into a fleet, and again to
+  move a fleet round a province's named coasts. **Centre** changes who owns a supply centre and
+  **Erase** empties a province. Pick the power from the coloured row first. Positions are free:
+  a power may have no units, and unit counts need not match centres.
+- **Orders** — the board's normal behaviour. Click a unit, choose Hold, Move, Support or Convoy,
+  then click where it is going. Orders save themselves, and every power is ordered from this one
+  board.
+- **Resolve** — adjudicates and shows you the position that came out of it. The arrows at the
+  bottom of the map step back a phase to see what happened.
+- **Reset** returns to the position as it was before the last Resolve, **Duplicate** copies the
+  board so you can try a different line, **Save** keeps the position by name, and **New** starts
+  from an empty board.
+
+`lab.php` is still there for the things that are not the board: the list of saved positions,
+importing and exporting JSON, setting the year and season, and deleting boards.
 
 ### Changing your password
 

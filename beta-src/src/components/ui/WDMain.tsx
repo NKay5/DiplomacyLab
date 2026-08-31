@@ -1,6 +1,7 @@
 import React from "react";
 import WDMainController from "../controllers/WDMainController";
 import WDUI from "./WDUI";
+import WDLabPanel from "./WDLabPanel";
 import {
   gameOrdersMeta,
   gameOverview,
@@ -342,6 +343,7 @@ const WDMain: React.FC = function (): React.ReactElement {
         units={units}
         viewingGameFinishedPhase={viewingGameFinishedPhase}
       />
+      <WDLabPanel />
     </WDMainController>
   );
 };

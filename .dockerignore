@@ -1,7 +1,11 @@
 .git
 .github
 beta-src/node_modules
+beta-src/build
 node_modules
+# The board is built by the beta-build stage in the Dockerfile. A copy left over from a local
+# `npm run build` must not be shipped instead of it.
+beta
 vendor
 cache
 mapstore

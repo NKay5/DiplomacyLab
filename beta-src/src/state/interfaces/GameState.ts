@@ -13,6 +13,7 @@ import GameAlert from "./GameAlert";
 import { OrderSubmissionUserIntent } from "../../interfaces/state/OrderSubmission";
 import Vote from "../../enums/Vote";
 import PlayerActiveGames from "./PlayerActiveGames";
+import LabState from "./LabState";
 
 export type ApiStatus = "idle" | "loading" | "succeeded" | "failed";
 
@@ -39,4 +40,5 @@ export interface GameState {
   alert: GameAlert;
   activeGames: PlayerActiveGames;
   numConsecutiveGetFailures: number; // How many consecutive GET API requests to the server were failures.
+  lab: LabState; // Diplomacy Lab: what a click on the board currently does.
 }

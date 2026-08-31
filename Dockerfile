@@ -4,6 +4,27 @@
 # service: Apache with mod_php, talking to a managed MySQL over a private network. It needs no
 # Redis, no gamemaster worker and no cron, because a Lab position is only ever adjudicated when
 # the user presses RESOLVE (see lib/labMode.php and doc/DIPLOMACY_LAB_ONLINE.md).
+
+# Diplomacy Lab *is* the modern board, so the React app has to be in the image rather than built by
+# hand. It is built in a stage of its own, and only its output is copied into the image, so Node is
+# not part of what ships.
+# The Debian image rather than the Alpine one: one dependency is pulled straight from GitHub, and
+# this image already has git and a toolchain for it. None of it ships, so its size does not matter.
+FROM node:20 AS beta-build
+# The build script reads a file from the sibling javascript/ directory and writes its output to a
+# sibling beta/, so the stage keeps the repository's own layout rather than fighting it.
+WORKDIR /src/beta-src
+COPY beta-src/package.json beta-src/package-lock.json ./
+# One dependency (keyboardjs) is locked to a GitHub URL written in git-over-SSH form, which needs
+# an SSH key that a build machine has no reason to have. The repository is public, so git is told
+# to reach GitHub over HTTPS instead; the commit the lock file pins is unchanged either way.
+RUN git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" \
+ && git config --global url."https://github.com/".insteadOf "git@github.com:" \
+ && npm ci --no-audit --no-fund
+COPY javascript/adsense.js /src/javascript/adsense.js
+COPY beta-src/ ./
+RUN npm run build && test -f /src/beta/index.html
+
 FROM php:8.4-apache
 
 # webDiplomacy needs gd for the map rendering, mysqli for the database, and gmp/bcmath for the
@@ -30,6 +51,10 @@ COPY composer.json composer.lock ./
 RUN composer install --no-dev --no-interaction --no-progress --ignore-platform-reqs --no-scripts
 
 COPY . /var/www/html
+
+# The board itself, from the stage above. It comes after the source copy because .dockerignore
+# excludes beta/ from the build context, so nothing here can be shadowed by a stale local build.
+COPY --from=beta-build /src/beta /var/www/html/beta
 
 COPY docker/php-lab.ini /usr/local/etc/php/conf.d/zz-lab.ini
 COPY docker/apache-lab.conf /etc/apache2/sites-available/000-default.conf

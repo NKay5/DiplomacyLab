@@ -108,13 +108,47 @@ class libLab
 		self::ensureTables();
 
 		$gameID = (int)$gameID;
-		$name = $DB->escape(self::trimName($name));
+		$trimmed = self::trimName($name);
+		$name = $DB->escape($trimmed);
 
 		$DB->sql_put("INSERT INTO wD_LabGames ( gameID, userID, name, timeCreated, timeLastUsed )
 			VALUES ( ".$gameID.", ".(int)$User->id.", '".$name."', ".time().", ".time()." )
 			ON DUPLICATE KEY UPDATE name = '".$name."', timeLastUsed = ".time());
 
+		$DB->sql_put("UPDATE wD_Games SET name = '".$DB->escape(self::gameName($trimmed, $gameID))."'
+			WHERE id = ".$gameID);
+
 		$DB->sql_put("COMMIT");
+	}
+
+	/**
+	 * What to call the underlying game, given the name the user gave the position.
+	 *
+	 * The board shows the game's own name, and in the Lab the board is the position, so the two are
+	 * kept the same rather than leaving webDiplomacy's generated sandbox name on screen. Two things
+	 * are in the way: wD_Games.name is much shorter than a Lab name may be, and it is unique across
+	 * the whole install, while nothing stops two Lab positions sharing a name. So it takes as much
+	 * of the name as fits, and adds the board's number if that alone is already taken.
+	 *
+	 * @param string $name the position's name, already trimmed
+	 * @param int $gameID
+	 * @return string
+	 */
+	private static function gameName($name, $gameID)
+	{
+		global $DB;
+
+		$gameID = (int)$gameID;
+		$gameName = mb_substr($name, 0, 50);
+
+		list($taken) = $DB->sql_row("SELECT COUNT(*) FROM wD_Games
+			WHERE name = '".$DB->escape($gameName)."' AND id <> ".$gameID);
+
+		if( !$taken ) return $gameName;
+
+		$suffix = ' (#'.$gameID.')';
+
+		return mb_substr($name, 0, 50 - strlen($suffix)).$suffix;
 	}
 
 	/**
@@ -166,8 +200,13 @@ class libLab
 
 		self::ensureTables();
 
-		$DB->sql_put("UPDATE wD_LabGames SET name = '".$DB->escape(self::trimName($name))."'
-			WHERE gameID = ".(int)$gameID);
+		$gameID = (int)$gameID;
+		$trimmed = self::trimName($name);
+
+		$DB->sql_put("UPDATE wD_LabGames SET name = '".$DB->escape($trimmed)."'
+			WHERE gameID = ".$gameID);
+		$DB->sql_put("UPDATE wD_Games SET name = '".$DB->escape(self::gameName($trimmed, $gameID))."'
+			WHERE id = ".$gameID);
 		$DB->sql_put("COMMIT");
 	}
 
@@ -290,7 +329,7 @@ class libLab
 		self::ensureTables();
 
 		$name = self::trimName($name);
-		if( $name === '' ) $name = 'Position '.date('Y-m-d H:i');
+		if( $name === '' ) $name = 'Position '.date('Y-m-d H:i:s');
 
 		$Position->name = $name;
 
@@ -394,16 +433,52 @@ class libLab
 	/**
 	 * The board URL for a Lab game.
 	 *
-	 * The Lab uses webDiplomacy's original board, with view=dropDown so that the classic order
-	 * interface is used. That interface already loads every country's orders in a sandbox game
-	 * and readies all of them at once, and unlike the React board it does not have to be built
-	 * with npm before it will run.
+	 * This is webDiplomacy's modern board, opened with lab=1 so that it shows Diplomacy Lab's own
+	 * controls and a click can edit the position as well as order a unit. It is the Lab itself:
+	 * building a position, ordering every power, adjudicating and stepping back all happen here.
 	 *
 	 * @param int $gameID
 	 * @return string
 	 */
 	public static function boardURL($gameID)
 	{
+		return 'beta/?gameID='.(int)$gameID.'&lab=1';
+	}
+
+	/**
+	 * The classic board, kept for looking at a position with webDiplomacy's original interface.
+	 *
+	 * @param int $gameID
+	 * @return string
+	 */
+	public static function classicBoardURL($gameID)
+	{
 		return 'board.php?gameID='.(int)$gameID.'&view=dropDown';
+	}
+
+	/**
+	 * The board the owner should land on: the position they were last working on, or a new empty
+	 * one if they have never made any.
+	 *
+	 * @return int the game ID of that board
+	 */
+	public static function currentOrNewGameID()
+	{
+		require_once(l_r('gamemaster/labGame.php'));
+
+		$games = self::listGames();
+
+		if( count($games) ) return (int)$games[0]['gameID'];
+
+		// First visit: the Lab opens on an empty board rather than an empty list.
+		$LabGame = processLabGame::createGame(1);
+
+		$Position = new LabPosition($LabGame->Variant);
+		$LabGame->setPosition($Position);
+
+		self::registerGame($LabGame->id, 'Position '.date('Y-m-d H:i:s'));
+		self::saveSnapshot($LabGame->id, $Position);
+
+		return (int)$LabGame->id;
 	}
 }

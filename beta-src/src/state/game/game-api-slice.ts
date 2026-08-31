@@ -267,6 +267,153 @@ export const loadGame = (gameID: string) => async (dispatch) => {
   }
 };
 
+/*
+ * Diplomacy Lab.
+ *
+ * The Lab drives the position from the board itself, so these are the actions the board needs
+ * beyond ordering: change a province, adjudicate, step back, branch, and keep a copy. Each one is
+ * a thin call to the lab/* API, which does all the work, followed by a reload, so that what the
+ * board shows is always what the server actually holds.
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Why the server refused a Lab request, in its own words.
+ *
+ * webDiplomacy's API answers a refusal with plain text and an error status ("Munich cannot hold a
+ * fleet."), which is exactly what belongs on the board. Anything else means the request never got
+ * an answer, so the transport's message is the best there is.
+ */
+const labRefusalReason = (error: any): string => {
+  const body = error?.response?.data;
+  if (typeof body === "string" && body.trim()) return body.trim();
+  if (body?.msg) return body.msg;
+  return error?.message || "That change could not be made.";
+};
+
+/**
+ * Make a lab/* request and bring the board up to date with what the server now holds.
+ *
+ * Reloading the board is part of the request rather than something that happens afterwards, and
+ * Lab requests are run strictly one after another. Building a position means clicking province
+ * after province, often faster than a round trip; left to overlap, two reads of the game would be
+ * in flight at once and the board would end up showing whichever answered last, which is not
+ * necessarily the newer one. Queueing keeps every click - none is dropped, and the board always
+ * ends up showing the position as it now stands.
+ *
+ * `reload` says how much has changed: an edit only moves units about, while adjudicating also
+ * changes the season, the phase and whose turn it is, which the board reads from the overview.
+ */
+let labPending: Promise<unknown> = Promise.resolve();
+
+const labRequest = (
+  route: ApiRoute,
+  queryParams: { [key: string]: string },
+  { dispatch, getState, rejectWithValue }: any,
+  reload: "position" | "everything" = "position",
+): Promise<any> => {
+  const run = async () => {
+    let data;
+
+    try {
+      ({ data } = await getGameApiRequest(route, queryParams));
+    } catch (error) {
+      return rejectWithValue(labRefusalReason(error));
+    }
+
+    const { overview } = (getState() as RootState).game;
+    const gameID = queryParams.gameID || String(overview.gameID);
+
+    if (gameID && gameID !== "0") {
+      if (reload === "everything")
+        await dispatch(fetchGameOverview({ gameID }));
+
+      const countryID = (getState() as RootState).game.overview.user?.member
+        .countryID;
+      await dispatch(
+        loadGameData(gameID, countryID ? String(countryID) : undefined),
+      );
+    }
+
+    return data;
+  };
+
+  const result = labPending.then(run, run);
+  labPending = result.catch(() => undefined);
+
+  return result;
+};
+
+/** The message to show when a Lab request fails. */
+const labErrorMessage = (action: any): string =>
+  (typeof action?.payload === "string" ? action.payload : "") ||
+  action?.payload?.msg ||
+  action?.error?.message ||
+  "That change could not be made.";
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+export const labEditProvince = createAsyncThunk(
+  ApiRoute.LAB_EDIT_PROVINCE,
+  async (
+    queryParams: {
+      gameID: string;
+      terrID: string;
+      tool: string;
+      countryID: string;
+      unitType: string;
+    },
+    thunkAPI,
+  ) => labRequest(ApiRoute.LAB_EDIT_PROVINCE, queryParams, thunkAPI),
+);
+
+export const labResolve = createAsyncThunk(
+  ApiRoute.LAB_RESOLVE,
+  async (queryParams: { gameID: string }, thunkAPI) =>
+    labRequest(ApiRoute.LAB_RESOLVE, queryParams, thunkAPI, "everything"),
+);
+
+export const labReset = createAsyncThunk(
+  ApiRoute.LAB_RESET,
+  async (queryParams: { gameID: string }, thunkAPI) =>
+    labRequest(ApiRoute.LAB_RESET, queryParams, thunkAPI, "everything"),
+);
+
+export const labDuplicate = createAsyncThunk(
+  ApiRoute.LAB_DUPLICATE,
+  async (
+    queryParams: { gameID: string; name: string },
+    { rejectWithValue },
+  ) => {
+    // The copy is a different board, which the browser is about to be sent to, so there is nothing
+    // here to bring up to date.
+    try {
+      const { data } = await getGameApiRequest(
+        ApiRoute.LAB_DUPLICATE,
+        queryParams,
+      );
+      return data;
+    } catch (error) {
+      return rejectWithValue(labRefusalReason(error));
+    }
+  },
+);
+
+export const labSavePosition = createAsyncThunk(
+  ApiRoute.LAB_SAVE,
+  async (
+    queryParams: { gameID: string; name: string },
+    { rejectWithValue },
+  ) => {
+    // Saving copies the position aside; the board itself is unchanged.
+    try {
+      const { data } = await getGameApiRequest(ApiRoute.LAB_SAVE, queryParams);
+      return data;
+    } catch (error) {
+      return rejectWithValue(labRefusalReason(error));
+    }
+  },
+);
+
 /**
  * createSlice handles state changes properly without reassiging state, but
  * eslint does not know this. therefore, no-param-reassign is disabled for
@@ -274,6 +421,14 @@ export const loadGame = (gameID: string) => async (dispatch) => {
  */
 
 /* eslint-disable no-param-reassign */
+
+/** Put the board on the newest phase there is, whatever it was looking at before. */
+const showLatestPhase = (state: GameState): void => {
+  const latest = Math.max(state.status.phases.length - 1, 0);
+
+  state.viewedPhaseState.viewedPhaseIdx = latest;
+  state.viewedPhaseState.latestPhaseViewed = latest;
+};
 
 const gameApiSlice = createSlice({
   name: "game",
@@ -290,6 +445,33 @@ const gameApiSlice = createSlice({
       state.territoriesMeta = action.payload;
     },
     processMapClick,
+    labSetMode(state, action) {
+      state.lab.mode = action.payload;
+      // Leaving edit mode must not leave a half-entered order behind, and entering it must not
+      // leave one showing on the map.
+      resetOrder(state);
+      // Start editing with a power chosen, so the first click puts something on the board.
+      // Neutral is still there to pick, and it is what empties a province.
+      if (action.payload === "edit" && !state.lab.countryID) {
+        const countryIDs = state.overview.members.map((m) => m.countryID);
+        if (countryIDs.length) state.lab.countryID = Math.min(...countryIDs);
+      }
+    },
+    labSetTool(state, action) {
+      state.lab.tool = action.payload;
+    },
+    labSetCountry(state, action) {
+      state.lab.countryID = action.payload;
+    },
+    labSetUnitType(state, action) {
+      state.lab.unitType = action.payload;
+    },
+    labSetEnabled(state, action) {
+      state.lab.enabled = action.payload;
+    },
+    labClearError(state) {
+      state.lab.error = null;
+    },
     processMessagesSeen(state, action) {
       const countryID = action.payload;
       state.messages.newMessagesFrom = state.messages.newMessagesFrom.filter(
@@ -371,6 +553,73 @@ const gameApiSlice = createSlice({
       .addCase(fetchGameStatus.fulfilled, fetchGameStatusFulfilled)
       .addCase(fetchGameStatus.rejected, (state, action) => {
         handleGetFailed(state, action);
+      })
+      /*
+       * Diplomacy Lab. Every Lab action ends the same way: the board asks the server for the
+       * position again, so what is drawn is always what was actually stored. The only state kept
+       * here is whether a request is in flight, and the reason if one failed.
+       */
+      .addCase(labEditProvince.pending, (state) => {
+        state.lab.busy = "edit";
+        state.lab.error = null;
+      })
+      // The thunks reload the board themselves before they finish, so by the time they are
+      // fulfilled there is nothing left to ask for.
+      .addCase(labEditProvince.fulfilled, (state) => {
+        state.lab.busy = null;
+      })
+      .addCase(labEditProvince.rejected, (state, action) => {
+        state.lab.busy = null;
+        state.lab.error = labErrorMessage(action);
+      })
+      .addCase(labResolve.pending, (state) => {
+        state.lab.busy = "resolve";
+        state.lab.error = null;
+      })
+      .addCase(labResolve.fulfilled, (state) => {
+        state.lab.busy = null;
+        // Adjudicating leaves the board on the phase that was just resolved, showing the arrows
+        // and bounces of what happened. In the Lab the point is to see where that leaves the
+        // position, so the board moves on to it; the phase controls step back to the results.
+        showLatestPhase(state);
+      })
+      .addCase(labResolve.rejected, (state, action) => {
+        state.lab.busy = null;
+        state.lab.error = labErrorMessage(action);
+      })
+      .addCase(labReset.pending, (state) => {
+        state.lab.busy = "reset";
+        state.lab.error = null;
+      })
+      .addCase(labReset.fulfilled, (state) => {
+        state.lab.busy = null;
+        showLatestPhase(state);
+      })
+      .addCase(labReset.rejected, (state, action) => {
+        state.lab.busy = null;
+        state.lab.error = labErrorMessage(action);
+      })
+      .addCase(labSavePosition.pending, (state) => {
+        state.lab.busy = "save";
+        state.lab.error = null;
+      })
+      .addCase(labSavePosition.fulfilled, (state) => {
+        state.lab.busy = null;
+      })
+      .addCase(labSavePosition.rejected, (state, action) => {
+        state.lab.busy = null;
+        state.lab.error = labErrorMessage(action);
+      })
+      .addCase(labDuplicate.pending, (state) => {
+        state.lab.busy = "duplicate";
+        state.lab.error = null;
+      })
+      .addCase(labDuplicate.fulfilled, (state) => {
+        state.lab.busy = null;
+      })
+      .addCase(labDuplicate.rejected, (state, action) => {
+        state.lab.busy = null;
+        state.lab.error = labErrorMessage(action);
       })
       .addCase(fetchPlayerActiveGames.fulfilled, (state, action) => {
         if (typeof action.payload.games !== "undefined") {
@@ -531,6 +780,7 @@ export const gameViewedPhase = ({
 export const gameLegalOrders = ({ game: { legalOrders } }: RootState) =>
   legalOrders;
 export const gameAlert = ({ game: { alert } }: RootState) => alert;
+export const gameLab = ({ game: { lab } }: RootState) => lab;
 export const playerActiveGames = ({ game: { activeGames } }: RootState) =>
   activeGames;
 export default gameApiSlice.reducer;

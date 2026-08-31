@@ -5,15 +5,21 @@ import WDAds from "./components/ui/WDAds";
 import WDMain from "./components/ui/WDMain";
 import useAdPlacement from "./hooks/useAdPlacement";
 import { useAppDispatch } from "./state/hooks";
-import { loadGame } from "./state/game/game-api-slice";
+import { gameApiSliceActions, loadGame } from "./state/game/game-api-slice";
 
 const App: React.FC = function (): React.ReactElement {
   const urlParams = new URLSearchParams(window.location.search);
   const currentGameID = urlParams.get("gameID");
+  // Diplomacy Lab opens the board with lab=1. The board is the whole application there, so the
+  // Lab's own controls appear on it and a click can edit the position as well as order a unit.
+  const isLab = urlParams.get("lab") === "1";
   const dispatch = useAppDispatch();
   React.useEffect(() => {
     dispatch(loadGame(String(currentGameID)));
   }, [dispatch, currentGameID]);
+  React.useEffect(() => {
+    dispatch(gameApiSliceActions.labSetEnabled(isLab));
+  }, [dispatch, isLab]);
   const adPlacement = useAdPlacement();
   return (
     <div className="App">

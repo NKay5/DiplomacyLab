@@ -83,9 +83,9 @@ if( !$labGameID )
 			{
 				$Variant = libVariant::loadFromVariantID($board['variantID']);
 				print '<tr class="hof">'.
-					'<td class="hof"><a href="lab.php?gameID='.$board['gameID'].'">'.htmlentities($board['name']).'</a></td>'.
+					'<td class="hof"><a href="'.libLab::boardURL($board['gameID']).'">'.htmlentities($board['name']).'</a></td>'.
 					'<td class="hof">'.$Variant->turnAsDate($board['turn']).', '.$board['phase'].'</td>'.
-					'<td class="hof"><a href="lab.php?gameID='.$board['gameID'].'&amp;mode=edit">Edit position</a></td>'.
+					'<td class="hof"><a href="lab.php?gameID='.$board['gameID'].'">Details</a></td>'.
 					'</tr>';
 			}
 			print '</table>';
@@ -206,6 +206,8 @@ $labYearTo = max(1950, $labYear + 10);
 
 	<!-- Mode switch -->
 	<div style="margin-bottom:10px">
+		<a class="green-Submit" style="padding:6px 14px;text-decoration:none"
+			href="<?php print libLab::boardURL($labGameID); ?>">OPEN THE BOARD</a>
 		<a class="form-submit" style="padding:4px 10px;<?php print $labMode=='edit' ? 'font-weight:bold' : ''; ?>"
 			href="lab.php?gameID=<?php print $labGameID; ?>&amp;mode=edit">EDIT POSITION</a>
 		<a class="form-submit" style="padding:4px 10px;<?php print $labMode=='orders' ? 'font-weight:bold' : ''; ?>"
@@ -525,10 +527,10 @@ $labYearTo = max(1950, $labYear + 10);
 				<?php print $labHasSnapshot ? '' : 'disabled'; ?> />
 		</form>
 		<a class="light" style="margin-left:12px" target="_blank"
-			href="<?php print libLab::boardURL($labGameID); ?>">Open the board in its own tab</a>
+			href="<?php print libLab::classicBoardURL($labGameID); ?>">Open the classic board</a>
 	</div>
 
-	<iframe id="labBoardFrame" src="<?php print libLab::boardURL($labGameID); ?>"
+	<iframe id="labBoardFrame" src="<?php print libLab::classicBoardURL($labGameID); ?>"
 		onload="labScrollFrameToBoard()"
 		style="width:100%; height:1600px; border:1px solid #999; background:#fff"></iframe>
 

@@ -9,14 +9,53 @@ The guiding rule of the implementation is: reuse webDiplomacy, do not reimplemen
 particular the adjudicator is untouched, and remains the only source of truth for the rules.
 
 
+The board is the application
+----------------------------
+
+Opening the Lab lands you on webDiplomacy's modern board - the React app in beta-src/, the same
+one the site itself uses - with the Lab's own controls on top of it. There is no list of
+positions to go through first and no separate editor page: everything happens on the map.
+
+  EDIT POSITION   A click puts a unit on a province or takes what is there away. Land gives an
+                  army, sea gives a fleet, and clicking a coastal province again turns its army
+                  into a fleet - or, where there is more than one named coast, moves the fleet
+                  round them. The Unit / Centre / Erase tools and the row of powers say what a
+                  click means. Positions are free: a power may have no units at all, and unit
+                  counts need not match supply centres. Only geography is enforced, by the
+                  server, and a refusal is shown in the panel in the server's own words
+                  ("Munich cannot hold a fleet.").
+
+  ORDERS          The board behaves exactly as webDiplomacy's board always has: click a unit,
+                  pick Hold / Move / Support / Convoy from the flyout, click where it is going.
+                  Orders save themselves. Because a Lab board is a sandbox game, every power's
+                  orders are entered from the one board.
+
+  RESOLVE         Adjudicates through the ordinary engine and moves the board on to the position
+                  that came out of it. The phase controls at the bottom of the board step back to
+                  the phase that was just resolved, where the arrows, bounces and supports are.
+
+RESET, DUPLICATE, SAVE and NEW sit alongside them, so a whole line of analysis - build, order,
+resolve, look, step back, try something else - never leaves the board.
+
+lab.php is still there, and still does everything it did: it is the place to list saved
+positions, import and export JSON, set the year and season, and delete boards. It is no longer
+where the work happens.
+
+
 What the Lab reuses unchanged
 -----------------------------
 
 Almost everything the Lab needs already existed as part of webDiplomacy's sandbox games:
 
-  * The position editor. javascript/canvasBoard.js is webDiplomacy's own click-a-province map
-    editor, written for gamecreateSandbox.php's "custom unit assignments". The Lab drives the
-    same script, so placing units looks and behaves exactly as it does when creating a sandbox.
+  * The board itself. beta-src/ is webDiplomacy's modern board, unchanged in how it draws the
+    map, the units, the arrows and the orders. The Lab adds one panel (WDLabPanel) and one
+    branch in the province click handler (WDProvince); everything else on screen is the board
+    the site already had.
+
+  * The classic position editor. javascript/canvasBoard.js is webDiplomacy's own click-a-province
+    map editor, written for gamecreateSandbox.php's "custom unit assignments". lab.php still
+    drives the same script, so the fallback editor behaves exactly as it does when creating a
+    sandbox.
 
   * Geographic validation. gamecreateSandbox.php already refuses armies at sea, fleets in
     landlocked provinces and two units in one province, and handles coast parents and children.
@@ -83,9 +122,9 @@ and processGame::process() resets processTime to one phase length after each adj
 board must never adjudicate itself while you are not looking, so processLabGame::freezeClock()
 pushes its process time ten years out after every change. Only pressing RESOLVE resolves a board.
 
-Note that pressing Ready inside the embedded board (rather than the Lab's RESOLVE button) will
-also adjudicate, via the ordinary sandbox path, but does not record a new reset point. RESOLVE is
-the button to use.
+Note that pressing the board's own Ready button (rather than the Lab's RESOLVE) will also
+adjudicate, via the ordinary sandbox path, but does not record a new reset point. RESOLVE is the
+button to use.
 
 
 Files
@@ -97,18 +136,44 @@ Added:
   gamemaster/labGame.php      processLabGame extends processSandboxGame: resolve, reset support,
                               duplicate, the changePhase override and the clock freeze.
   lib/lab.php                 libLab: the Lab's two tables, saved positions and reset snapshots.
-  lab.php                     The Lab page: home, position editor and orders view.
-  locales/English/lab.php     The Lab's markup and the editor's JavaScript.
+  lib/labMode.php             libLabMode: running this install as one person's private Lab.
+  lab.php                     The Lab page: saved positions, JSON, the calendar, the fallback
+                              editor.
+  locales/English/lab.php     The Lab's markup and the fallback editor's JavaScript.
   install/DiplomacyLab/lab.sql  The Lab's schema.
 
+  beta-src/src/components/ui/WDLabPanel.tsx      The Lab's controls, drawn over the board.
+  beta-src/src/state/interfaces/LabState.ts      What the Lab adds to the board's state.
+
 Modified:
-  api.php                     The lab/* API entries.
+  api.php                     The lab/* API entries, and one fix described below.
   lib/html.php                A menu entry.
+  board.php                   Sends a Lab board to the modern board with the Lab turned on.
   install/FullInstall/fullInstall.sql  The Lab's two tables.
+
+  beta-src/src/App.tsx                                    Reads ?lab=1.
+  beta-src/src/components/ui/WDMain.tsx                   Mounts the Lab panel.
+  beta-src/src/components/map/components/WDProvince.tsx   A click edits the position while
+                                                          editing, and orders otherwise.
+  beta-src/src/state/game/game-api-slice.ts               The lab/* thunks and their state.
+  beta-src/src/state/game/initial-state.ts, GameState.ts, enums/ApiRoute.ts
 
 Deliberately untouched:
   gamemaster/adjudicator/*, gamemaster/orders/*, gamemaster/game.php, board/*, map.php,
   datc/*, variants/*.
+
+
+One fix outside the Lab
+-----------------------
+
+Members->ByUserID holds one member per user, so in a sandbox game - where one user holds every
+country - it names whichever country happens to sort first. Members::load() orders by supply
+centre count, so that country changes the moment a centre changes hands. Three API entries
+(game/data, game/status, game/getmessages) used it to decide whether the caller may ask about a
+country, which meant a Lab board could refuse to load itself immediately after a supply centre
+was given away. They now ask ByCountryID whether that country belongs to the caller, which is
+the question that was meant and behaves identically for an ordinary game, where a user holds one
+country. game/status already used ByCountryID on the line after the check.
 
 
 Database
@@ -183,13 +248,22 @@ API
 The Lab page itself uses plain form posts, but the same operations are available over the API
 for scripting, at api.php?route=... . All of them check that the position belongs to the caller.
 
-  lab/create       GET  variantID, name          -> { gameID, name }
-  lab/position     GET  gameID                   -> the position, in the JSON format above
-  lab/setPosition  JSON gameID, position         -> the position as stored
-  lab/resolve      GET  gameID                   -> { gameID, turn, phase }
-  lab/reset        GET  gameID                   -> { gameID, turn, phase }
-  lab/duplicate    GET  gameID, name             -> { gameID, name }
-  lab/delete       GET  gameID                   -> { gameID }
+  lab/create        GET  variantID, name         -> { gameID, name }
+  lab/position      GET  gameID                  -> the position, in the JSON format above
+  lab/setPosition   JSON gameID, position        -> the position as stored
+  lab/editProvince  GET  gameID, terrID, tool,   -> { gameID }
+                         countryID, unitType
+  lab/resolve       GET  gameID                  -> { gameID, turn, phase }
+  lab/reset         GET  gameID                  -> { gameID, turn, phase }
+  lab/duplicate     GET  gameID, name            -> { gameID, name }
+  lab/save          GET  gameID, name            -> { positionID, name }
+  lab/delete        GET  gameID                  -> { gameID }
+
+lab/editProvince is one click on the board. tool is "unit", "center" or "erase"; unitType is
+"Auto", "Army" or "Fleet"; countryID 0 means neutral, which empties the province or leaves the
+centre unowned. Any territory of a province may be given: the server normalises it to the
+province and picks the right coast itself, so the board does not have to know the map's rules.
+A refusal comes back as plain text with an error status, which is what the board shows.
 
 A headless "give me a position and orders, return the result" entry is not implemented, but the
 pieces it needs are all here: LabPosition to read and write the board, and processLabGame::resolve()

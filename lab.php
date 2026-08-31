@@ -89,6 +89,31 @@ if( $labGameID && isset($_REQUEST['export']) )
  * All Lab actions are ordinary form posts handled here, before any output, so that each one can
  * finish with a redirect. That keeps reloads from repeating an adjudication.
  */
+/*
+ * The board's "New" button lands here: make an empty position and open it on the board. Kept as a
+ * plain link so the board does not have to care how a Lab game is created.
+ */
+if( isset($_REQUEST['newBoard']) )
+{
+	try
+	{
+		$LabGame = processLabGame::createGame(1);
+
+		$Position = new LabPosition($LabGame->Variant);
+		$LabGame->setPosition($Position);
+
+		libLab::registerGame($LabGame->id, 'Position '.date('Y-m-d H:i:s'));
+		libLab::saveSnapshot($LabGame->id, $Position);
+
+		header('Location: '.libLab::boardURL($LabGame->id));
+		die();
+	}
+	catch(Exception $e)
+	{
+		$labError = $e->getMessage();
+	}
+}
+
 if( isset($_POST['labAction']) )
 {
 	$redirectTo = 'lab.php'.($labGameID ? '?gameID='.$labGameID : '');
@@ -113,11 +138,11 @@ if( isset($_POST['labAction']) )
 				$LabGame->setPosition($Position);
 
 				$name = isset($_POST['name']) ? $_POST['name'] : '';
-				if( libLab::trimName($name) === '' ) $name = 'Position '.date('Y-m-d H:i');
+				if( libLab::trimName($name) === '' ) $name = 'Position '.date('Y-m-d H:i:s');
 				libLab::registerGame($LabGame->id, $name);
 				libLab::saveSnapshot($LabGame->id, $Position);
 
-				$redirectTo = 'lab.php?gameID='.$LabGame->id.'&mode=edit&notice=created';
+				$redirectTo = libLab::boardURL($LabGame->id);
 				break;
 			}
 

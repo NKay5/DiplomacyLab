@@ -91,9 +91,18 @@ try
 	{
 		// Default to using the point and click UI for this user.
 
-		header("Location: beta/?gameID=".$gameID);
+		// A Diplomacy Lab position opens the board as the Lab, so its own controls are there and a
+		// click can edit the position as well as order a unit.
+		$labFlag = '';
+		if( libLabMode::isEnabled() )
+		{
+			require_once(l_r('lib/lab.php'));
+			if( libLab::isLabGame($gameID) ) $labFlag = '&lab=1';
+		}
 
-		libHTML::notice('Loading board', '<em>Loading the game board, please wait.. If you are not redirected within 5 seconds, <a href="beta/?gameID='.$gameID.'">click here</a>.</em>');
+		header("Location: beta/?gameID=".$gameID.$labFlag);
+
+		libHTML::notice('Loading board', '<em>Loading the game board, please wait.. If you are not redirected within 5 seconds, <a href="beta/?gameID='.$gameID.$labFlag.'">click here</a>.</em>');
 
 		die();
 	}

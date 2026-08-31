@@ -4,8 +4,10 @@ import countryMap from "../../../data/map/variants/classic/CountryMap";
 import { ProvinceMapData } from "../../../interfaces";
 import {
   gameApiSliceActions,
+  gameLab,
   gameMaps,
   gameOverview,
+  labEditProvince,
 } from "../../../state/game/game-api-slice";
 import { useAppDispatch, useAppSelector } from "../../../state/hooks";
 import ClickObjectType from "../../../types/state/ClickObjectType";
@@ -30,7 +32,9 @@ const WDProvince: React.FC<WDProvinceProps> = function ({
   const theme = useTheme();
   const dispatch = useAppDispatch();
 
-  const { user, members } = useAppSelector(gameOverview);
+  const { user, members, gameID } = useAppSelector(gameOverview);
+  const maps = useAppSelector(gameMaps);
+  const lab = useAppSelector(gameLab);
 
   const { province } = provinceMapData;
   let territoryFill = "none";
@@ -63,6 +67,30 @@ const WDProvince: React.FC<WDProvinceProps> = function ({
   const clickAction = function (
     evt: React.MouseEvent<SVGGElement, MouseEvent>,
   ) {
+    // In Diplomacy Lab the same board is used to build a position and then to play it out. While
+    // editing, a click changes what is on the province rather than starting an order; the server
+    // decides what the province can actually hold.
+    if (lab.enabled && lab.mode === "edit") {
+      // Clicking province after province is faster than a round trip, so the clicks queue up
+      // rather than being dropped or racing each other; see labRequest in the slice.
+      // Any territory of this province will do: the server normalises coasts to their province.
+      const terrID = Object.keys(maps.terrIDToProvince).find(
+        (id) => maps.terrIDToProvince[id] === province,
+      );
+      if (!terrID) return;
+
+      dispatch(
+        labEditProvince({
+          gameID: String(gameID),
+          terrID: String(terrID),
+          tool: lab.tool,
+          countryID: String(lab.countryID),
+          unitType: lab.unitType,
+        }),
+      );
+      return;
+    }
+
     dispatch(
       gameApiSliceActions.processMapClick({
         evt,
