@@ -22,6 +22,16 @@ export default function fetchGameStatusFulfilled(
   }
 
   state.status = action.payload;
+
+  // A game's history can get shorter as well as longer: the Lab rebuilds a board from an earlier
+  // position, which takes the phases after it with it. The phase being viewed has to come back
+  // inside the list, or the board is left pointing at a phase that is no longer there.
+  const lastPhaseIdx = Math.max(action.payload.phases.length - 1, 0);
+  if (state.viewedPhaseState.viewedPhaseIdx > lastPhaseIdx)
+    state.viewedPhaseState.viewedPhaseIdx = lastPhaseIdx;
+  if (state.viewedPhaseState.latestPhaseViewed > lastPhaseIdx)
+    state.viewedPhaseState.latestPhaseViewed = lastPhaseIdx;
+
   const {
     data: { data },
     overview: { members },

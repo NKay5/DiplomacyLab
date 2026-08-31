@@ -264,7 +264,10 @@ const WDMain: React.FC = function (): React.ReactElement {
     );
     const prevPhase = status.phases[viewedPhaseState.viewedPhaseIdx - 1];
     const standoffsByProvince: { [key: string]: StandoffInfo } = {};
-    prevPhase.orders.forEach((order) => {
+    // The phase before this one is not always there to read: a retreat can be the first phase the
+    // game has a record of, and the Lab can rebuild a board from a position whose history has not
+    // been played on this board at all.
+    (prevPhase?.orders || []).forEach((order) => {
       if (order.type === "Move" && order.toTerrID) {
         const provID = maps.terrIDToProvinceID[order.toTerrID];
         if (!provID) {
