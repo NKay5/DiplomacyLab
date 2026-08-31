@@ -41,9 +41,10 @@ type.
 
 That address opens straight onto the board, with the Lab's controls along the top of the map:
 **Edit position** to click units onto provinces, **Orders** to order them the way the board
-normally works, **Resolve** to adjudicate, and **Reset**, **Duplicate**, **Save** and **New**
-beside them. `lab.php` is still there for saved positions, JSON import and export, and setting
-the year and season.
+normally works, the branch box and **← Previous / Next →** to move through what you have played,
+and **Rename**, **Delete branch** and **New scenario** beside them. The board's own **Ready**
+button, at the bottom, adjudicates. Stepping back and playing something else starts a new branch
+by itself. `lab.php?export=1&gameID=N` exports a position as JSON.
 
 If it is already running, double-clicking just brings it back up in the browser.
 
@@ -96,7 +97,7 @@ keeps all your data.
   network. Its data is in the named volume `diplomacy-lab-db`.
 
 No Redis, no worker, no cron. `objects/redis.php` no-ops when no host is configured, and a Lab
-position is only adjudicated when the user presses RESOLVE.
+position is only adjudicated when the user presses Ready.
 
 The same image serves the hosted deployment described in `doc/DIPLOMACY_LAB_ONLINE.md`; only the
 environment differs.

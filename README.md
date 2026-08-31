@@ -49,22 +49,26 @@ Wait for the line `READY - webDiplomacy system initialized`, then:
    http://localhost:43000/register.php?emailToken=9513e6f6%7C1665482821%7Ctest%40test.com
    (Start the `dev` profile as well &mdash; `docker compose --profile core --profile dev up -d`
    &mdash; if you would rather read the mail at http://localhost:43001 .)
-2. Open **Diplomacy Lab** at http://localhost:43000/lab.php , or from the Games menu.
+2. Open **Diplomacy Lab** at http://localhost:43000/lab.php , or from the Games menu. It goes
+   straight to the board.
 
 ### Using it
 
-* **New position** creates an empty board. Nothing is on it and every supply center is neutral.
-* **EDIT POSITION** is webDiplomacy's own map editor. Pick a power's colour, pick whether you are
-  placing a unit, a supply center or both, and click provinces. Clicking a coastal province that
-  already holds that power's army places a fleet. Pick *None* to empty a province. Choose the
-  year, season and phase here too, then press **APPLY POSITION**.
-* **ORDERS** is webDiplomacy's own board. Because a Lab board is a sandbox game, every power's
-  orders appear together and you enter them exactly as you would in a game.
-* **RESOLVE** readies every power and adjudicates immediately, with the original adjudicator.
-* **RESET** returns the board to exactly the position it was in before that adjudication, so you
-  can change one order and try again.
-* **Duplicate** makes an independent copy of the current position, for exploring variations side
-  by side. **Save**, **Export JSON** and **Import** move positions in and out.
+Everything happens on the board. The Lab's controls sit along the top of the map.
+
+* **Edit position** turns a click into a placement: pick a power's colour and whether you are
+  placing a unit, a supply center or erasing, and click provinces. Clicking a coastal province
+  that already holds that power's army turns it into a fleet.
+* **Orders** is webDiplomacy's own board. Because a Lab board is a sandbox game, every power's
+  orders are entered from the one board.
+* **Ready** — the board's own button — adjudicates every power's orders at once, with the
+  original adjudicator. There is no readiness to wait for and no timer.
+* **← Previous** and **Next →** move through the positions you have played. Nothing is
+  adjudicated and nothing is rewritten by looking.
+* Step back, order something else and press Ready, and a new branch is started for it
+  automatically. The branch box switches between them; **Rename** and **Delete branch** manage
+  them; **New scenario** starts again from an empty board.
+* `lab.php?export=1&gameID=N` exports a position as JSON.
 
 Nothing is enforced except the geography of the map: powers may have no units at all, unit counts
 need not match supply center counts, and supply centers may be left neutral.

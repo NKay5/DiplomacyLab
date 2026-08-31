@@ -44,14 +44,18 @@ The controls sit along the top of the map:
 - **Orders** — the board's normal behaviour. Click a unit, choose Hold, Move, Support or Convoy,
   then click where it is going. Orders save themselves, and every power is ordered from this one
   board.
-- **Resolve** — adjudicates and shows you the position that came out of it. The arrows at the
-  bottom of the map step back a phase to see what happened.
-- **Reset** returns to the position as it was before the last Resolve, **Duplicate** copies the
-  board so you can try a different line, **Save** keeps the position by name, and **New** starts
-  from an empty board.
+- **Ready** — the board's own button, at the bottom. It adjudicates every power's orders at once
+  and shows you the position that came out of it. There is nothing to wait for and no timer.
+  The arrows at the bottom of the map step back a phase to see what happened.
+- **← Previous** and **Next →** walk back and forth through the positions you have played. Only
+  the board changes: coming back to a position shows it exactly as it was, with the orders you
+  entered there.
+- The **branch** box says which line you are looking at. Step back, order something else, press
+  Ready, and a new branch — SC2, then SC3 — is started for it automatically; the line you came
+  from keeps everything it had. **Rename** names a branch, **Delete branch** removes one you are
+  not looking at, and **New scenario** starts again from an empty board.
 
-`lab.php` is still there for the things that are not the board: the list of saved positions,
-importing and exporting JSON, setting the year and season, and deleting boards.
+`lab.php?export=1&gameID=N` gives you the position on a board as JSON.
 
 ### Changing your password
 
@@ -95,7 +99,7 @@ There is deliberately no Redis, no worker and no cron:
 * Redis is optional. `objects/redis.php` connects if a host is configured and otherwise turns every
   call into a no-op. It is used upstream for caching, for hinting the gamemaster, and for feeding
   the SSE server; a Lab needs none of those.
-* No gamemaster runs. A Lab position must only ever be adjudicated when the user presses RESOLVE,
+* No gamemaster runs. A Lab position must only ever be adjudicated when the user presses Ready,
   which `processLabGame::resolve()` does synchronously.
 
 ### Deployment mechanics

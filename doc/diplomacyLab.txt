@@ -30,16 +30,40 @@ positions to go through first and no separate editor page: everything happens on
                   Orders save themselves. Because a Lab board is a sandbox game, every power's
                   orders are entered from the one board.
 
-  RESOLVE         Adjudicates through the ordinary engine and moves the board on to the position
-                  that came out of it. The phase controls at the bottom of the board step back to
-                  the phase that was just resolved, where the arrows, bounces and supports are.
+  READY           webDiplomacy's own Ready button, and the only thing that adjudicates a Lab
+                  board. It saves whatever orders are on the board and hands them straight to the
+                  engine, so the result is always of the position on screen. There is no
+                  readiness to wait for and no timer: one person enters every power's orders, so
+                  pressing it once is the whole of it. Outside the Lab, Ready is untouched.
 
-RESET, DUPLICATE, SAVE and NEW sit alongside them, so a whole line of analysis - build, order,
-resolve, look, step back, try something else - never leaves the board.
+Along the top of the map are the analysis controls:
 
-lab.php is still there, and still does everything it did: it is the place to list saved
-positions, import and export JSON, set the year and season, and delete boards. It is no longer
-where the work happens.
+  [ SC1 v ]   <- Previous   Next ->   Spring 1902 Movement (3/4)   Rename   Delete branch
+
+  PREVIOUS /  Step through the positions of the branch being shown. Only the board changes:
+  NEXT        nothing is adjudicated, nothing is written, and coming back to a position shows it
+              exactly as it was, with the orders that were played from it.
+
+  BRANCH      Which line of play the board is showing. Switching opens that branch where it was
+              last left.
+
+  RENAME /    A branch can be given a name of its own, and one that nothing else grew out of can
+  DELETE      be deleted. The branch being shown, the last branch of a scenario, and any branch
+              another branch was started from are refused, with the reason.
+
+  NEW         Starts a new scenario on an empty board.
+  SCENARIO
+
+Branching happens by itself. Ready at the end of a branch adds the next position to it. Ready
+anywhere earlier cannot do that without rewriting what has already been played, so it starts a
+new branch instead - SC2, SC3 - adjudicates there, and says so quietly on the panel. The branch
+that was left keeps every position it had.
+
+There are no gameIDs to keep track of. Each branch does have a board of its own underneath, and
+switching branch changes the URL, but nothing asks you to know that.
+
+lab.php is no longer a page: it is the way in (open the current scenario, or start a new one with
+?newBoard=1) and the JSON export (?export=1&gameID=N).
 
 
 What the Lab reuses unchanged
@@ -99,9 +123,10 @@ Four things were genuinely missing, and they are what the Lab code provides.
 
 4. An exact reset point.
    processGame::moveTurnBack() replays webDiplomacy's turn archives, which only goes back one
-   turn and depends on that history being intact. The Lab instead snapshots the position as JSON
-   immediately before adjudicating (wD_LabGames.snapshotJSON) and restores it by simply applying
-   that position again. RESET therefore returns to exactly the board you built.
+   turn and depends on that history being intact. The Lab instead keeps every position it has
+   been in as a snapshot of its own, in wD_LabNodes, and goes back to one by applying it again.
+   Stepping back therefore returns to exactly the board that was there, however many phases ago,
+   and whatever has been played from it since.
 
 
 The one behavioural change, and why
@@ -120,11 +145,17 @@ rules, and the DATC results, are unaffected.
 The other adjustment is the clock. The gamemaster picks up any game whose processTime has passed,
 and processGame::process() resets processTime to one phase length after each adjudication. A Lab
 board must never adjudicate itself while you are not looking, so processLabGame::freezeClock()
-pushes its process time ten years out after every change. Only pressing RESOLVE resolves a board.
+pushes its process time ten years out after every change. Only pressing Ready resolves a board.
 
-Note that pressing the board's own Ready button (rather than the Lab's RESOLVE) will also
-adjudicate, via the ordinary sandbox path, but does not record a new reset point. RESOLVE is the
-button to use.
+The third is what Ready means. In webDiplomacy, Ready says "I have finished, wait for the
+others": ajax.php writes an order status and leaves a hint for the gamemaster, and the board is
+locked until every player is in. In the Lab there are no others - one person enters every power's
+orders - and the gamemaster is exactly what has been pushed out of reach, so on a Lab board that
+does nothing but freeze the board. So in the Lab, and only in the Lab, Ready saves the orders and
+then calls lab/ready, which hands them to processGame::process() itself. It never sets a member
+ready, so the board is never locked. WDOrderStatusControls decides this from lab.enabled; with
+it off, every line of the original path runs unchanged, which install/DiplomacyLab/checkNonLab.php
+checks by playing an ordinary seven-player game.
 
 
 Files
@@ -133,37 +164,51 @@ Files
 Added:
   objects/labPosition.php     The LabPosition class: the JSON position format, its validation,
                               reading a position out of a game and writing one into a game.
-  gamemaster/labGame.php      processLabGame extends processSandboxGame: resolve, reset support,
-                              duplicate, the changePhase override and the clock freeze.
-  lib/lab.php                 libLab: the Lab's two tables, saved positions and reset snapshots.
+  gamemaster/labGame.php      processLabGame extends processSandboxGame: resolve, setPosition,
+                              the changePhase override and the clock freeze.
+  lib/lab.php                 libLab: board names and the board URL.
+  lib/labTree.php             libLabTree: scenarios, branches and positions - the analysis tree,
+                              and the decision of whether Ready continues a branch or starts one.
   lib/labMode.php             libLabMode: running this install as one person's private Lab.
-  lab.php                     The Lab page: saved positions, JSON, the calendar, the fallback
-                              editor.
-  locales/English/lab.php     The Lab's markup and the fallback editor's JavaScript.
+  lab.php                     The way in: open the current scenario, start a new one, export JSON.
   install/DiplomacyLab/lab.sql  The Lab's schema.
   install/DiplomacyLab/checkSnapshots.php
                               A command line check that a position survives being snapshotted,
                               destroyed and restored, for all three phases.
+  install/DiplomacyLab/checkNonLab.php
+                              A command line check that an ordinary game's Ready is unchanged.
 
   beta-src/src/components/ui/WDLabPanel.tsx      The Lab's controls, drawn over the board.
   beta-src/src/state/interfaces/LabState.ts      What the Lab adds to the board's state.
 
 Modified:
   api.php                     The lab/* API entries, and one fix described below.
+  map.php                     ?mapType=json is JavaScript and now says so; see below.
   lib/html.php                A menu entry.
   board.php                   Sends a Lab board to the modern board with the Lab turned on.
-  install/FullInstall/fullInstall.sql  The Lab's two tables.
+  docker/apache-lab.conf      Serves the two .json files webDiplomacy loads as scripts as
+                              JavaScript.
+  install/FullInstall/fullInstall.sql  The Lab's tables.
 
-  beta-src/src/App.tsx                                    Reads ?lab=1.
-  beta-src/src/components/ui/WDMain.tsx                   Mounts the Lab panel.
+  beta-src/src/App.tsx                                    Reads ?lab=1 and loads the tree.
+  beta-src/src/components/ui/WDMain.tsx                   Mounts the Lab panel; tolerates a
+                                                          retreat with no phase before it.
+  beta-src/src/components/ui/WDOrderStatusControls.tsx    Ready adjudicates, in the Lab only.
   beta-src/src/components/map/components/WDProvince.tsx   A click edits the position while
                                                           editing, and orders otherwise.
   beta-src/src/state/game/game-api-slice.ts               The lab/* thunks and their state.
+  beta-src/src/utils/state/gameApiSlice/extraReducers/fetchGameStatus/fulfilled.ts
+                                                          Keeps the viewed phase inside the list.
   beta-src/src/state/game/initial-state.ts, GameState.ts, enums/ApiRoute.ts
 
+Removed:
+  locales/English/lab.php     The old Lab dashboard. The board is the application.
+
 Deliberately untouched:
-  gamemaster/adjudicator/*, gamemaster/orders/*, gamemaster/game.php, board/*, map.php,
-  datc/*, variants/*.
+  gamemaster/*, board/*, datc/*, variants/*. Not one file under any of them has changed since
+  the v1.0-modern-board tag - `git diff --name-only v1.0-modern-board..HEAD -- gamemaster board
+  datc variants` is empty - so the adjudicator, the order processors and the DATC harness are
+  byte for byte what webDiplomacy ships.
 
 
 One fix outside the Lab
@@ -182,14 +227,39 @@ country. game/status already used ByCountryID on the line after the check.
 Database
 --------
 
-Two new tables, and no changes to any existing table:
+Five new tables, and no changes to any existing table:
 
-  wD_LabGames       One row per Lab board: its user-visible name, its owner, and snapshotJSON,
-                    the position as it stood immediately before the last RESOLVE.
-  wD_LabPositions   Positions the user has saved by name, as JSON.
+  wD_LabScenarios   A line of play being studied: its name, its owner, and which of its branches
+                    the board is showing.
+  wD_LabBranches    One branch of a scenario: the sandbox game it plays on, the position it ends
+                    at (headNodeID) and the position it is currently showing (currentNodeID).
+  wD_LabNodes       One position, as a JSON snapshot, and the position it came from
+                    (parentNodeID). This is the record that matters; the games are working space.
+  wD_LabGames       One row per board: its user-visible name and its owner.
+  wD_LabPositions   Positions saved by name, as JSON. Kept for the JSON format's sake.
 
-lib/lab.php creates both on demand (CREATE TABLE IF NOT EXISTS), so an existing database does not
-need to be migrated by hand.
+lib/lab.php and lib/labTree.php create them on demand (CREATE TABLE IF NOT EXISTS), so an
+existing database does not need to be migrated by hand.
+
+How the three tree tables fit together:
+
+  scenario ---> branch "SC1" ---> node ---> node ---> node        (headNodeID)
+                    |                          \
+                    |                           \--- branch "SC2" ---> node ---> node
+                    |                                (parentNodeID points back at the node it
+                    |                                 was started from)
+                    +--> gameID: the sandbox game this branch is played on
+
+A branch's game holds whichever node is being looked at, and is rebuilt from that node whenever
+it changes. Nodes are only ever added; the one exception is the last node of a branch, whose
+stored orders are updated as it is adjudicated, so that coming back to it shows what was played.
+
+One fix outside the Lab, part two: map.php?mapType=json returns the source of a
+loadBoardTurnData() function, which the classic board loads with a <script> tag, but declared it
+text/plain. The image sends X-Content-Type-Options: nosniff, so browsers refused to run it and
+the classic board came up empty - which also stopped datc.php, since it builds its orders through
+the same code. It is now declared text/javascript, and docker/apache-lab.conf does the same for
+the two cached .json files webDiplomacy loads the same way.
 
 A Lab board is an ordinary webDiplomacy sandbox game: a row in wD_Games with
 sandboxCreatedByUserID set, and seven wD_Members rows all belonging to the one user. That is why
@@ -295,19 +365,37 @@ the adjudicator's.
 API
 ---
 
-The Lab page itself uses plain form posts, but the same operations are available over the API
-for scripting, at api.php?route=... . All of them check that the position belongs to the caller.
+The board does everything over the API, at api.php?route=... , and so can a script. All of them
+check that the scenario belongs to the caller.
 
-  lab/create        GET  variantID, name         -> { gameID, name }
-  lab/position      GET  gameID                  -> the position, in the JSON format above
-  lab/setPosition   JSON gameID, position        -> the position as stored
-  lab/editProvince  GET  gameID, terrID, tool,   -> { gameID }
-                         countryID, unitType
-  lab/resolve       GET  gameID                  -> { gameID, turn, phase }
-  lab/reset         GET  gameID                  -> { gameID, turn, phase }
-  lab/duplicate     GET  gameID, name            -> { gameID, name }
-  lab/save          GET  gameID, name            -> { positionID, name }
-  lab/delete        GET  gameID                  -> { gameID }
+  lab/scenario/new    GET  variantID, name       -> a place (see below)
+  lab/scenario/list   GET                        -> { scenarios: [...] }
+  lab/scenario/delete GET  scenarioID            -> { scenarioID }
+  lab/tree            GET  gameID                -> the scenario's branches and positions,
+                                                    plus "current" (a place) and "canEdit"
+  lab/ready           GET  gameID                -> a place, with branchCreated set if
+                                                    adjudicating started a new branch
+  lab/step            GET  gameID, direction     -> a place ("previous" or "next")
+  lab/node/select     GET  nodeID                -> a place
+  lab/branch/select   GET  branchID              -> a place
+  lab/branch/rename   GET  branchID, name        -> { branchID }
+  lab/branch/delete   GET  branchID              -> { branchID }
+  lab/position        GET  gameID                -> the position, in the JSON format above
+  lab/setPosition     JSON gameID, position      -> the position as stored
+  lab/editProvince    GET  gameID, terrID, tool, -> the position as stored
+                           countryID, unitType
+
+A "place" is where the board is:
+
+  { scenarioID, scenarioName, branchID, branchName, gameID, nodeID, headNodeID,
+    atHead, branchCreated }
+
+gameID is the board that place is on. It changes when the branch does, which is why starting a
+branch sends the browser somewhere else; everything else keeps the board it is on.
+
+lab/setPosition and lab/editProvince are refused, with the reason as plain text, on a Retreats or
+Adjustments position (they are consequences, not starting points) and on any position that has
+already been played from (editing it would change what the positions after it grew out of).
 
 lab/editProvince is one click on the board. tool is "unit", "center" or "erase"; unitType is
 "Auto", "Army" or "Fleet"; countryID 0 means neutral, which empties the province or leaves the
