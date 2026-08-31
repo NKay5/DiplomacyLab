@@ -676,6 +676,18 @@ class LabEditProvince extends ApiEntry {
 
 		$Position = $LabGame->getPosition();
 
+		/*
+		 * A position is edited to set up an analysis, and what follows from it is the engine's.
+		 * Retreats and Builds are not positions anyone sets up: they are consequences, and they
+		 * carry state - which unit was dislodged, where its attacker came from, what may be built
+		 * and where - that only means anything as the outcome of the phase before. Moving pieces
+		 * around underneath that state would leave a board describing a situation that could not
+		 * have happened, so editing is offered on a Movement phase only.
+		 */
+		if( $Position->phase !== 'Diplomacy' )
+			throw new RequestException('A position can only be edited during a Movement phase. '
+				.'Reset the board, or resolve this phase first.');
+
 		$terrID = (int)$args['terrID'];
 		$territories = $Position->territories();
 
@@ -789,6 +801,10 @@ class LabEditProvince extends ApiEntry {
 				break;
 			}
 		}
+
+		// Moving pieces about invalidates everything the engine had worked out about the position,
+		// so the board is rebuilt around the edited units rather than around stale occupancy.
+		$Position->clearEngineState();
 
 		$LabGame->setPosition($Position);
 

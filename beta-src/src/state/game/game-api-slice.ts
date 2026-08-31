@@ -430,6 +430,17 @@ const showLatestPhase = (state: GameState): void => {
   state.viewedPhaseState.latestPhaseViewed = latest;
 };
 
+/**
+ * Leave edit mode if the board has moved to a phase that cannot be edited.
+ *
+ * Retreats and adjustments follow from the moves before them, so there is nothing to hand-edit
+ * there; landing on one with the editor still open would offer a click that only ever fails.
+ */
+const settleLabMode = (state: GameState): void => {
+  if (state.lab.mode === "edit" && state.overview.phase !== "Diplomacy")
+    state.lab.mode = "orders";
+};
+
 const gameApiSlice = createSlice({
   name: "game",
   initialState,
@@ -582,6 +593,7 @@ const gameApiSlice = createSlice({
         // and bounces of what happened. In the Lab the point is to see where that leaves the
         // position, so the board moves on to it; the phase controls step back to the results.
         showLatestPhase(state);
+        settleLabMode(state);
       })
       .addCase(labResolve.rejected, (state, action) => {
         state.lab.busy = null;
@@ -594,6 +606,7 @@ const gameApiSlice = createSlice({
       .addCase(labReset.fulfilled, (state) => {
         state.lab.busy = null;
         showLatestPhase(state);
+        settleLabMode(state);
       })
       .addCase(labReset.rejected, (state, action) => {
         state.lab.busy = null;

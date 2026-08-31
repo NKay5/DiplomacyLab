@@ -165,8 +165,12 @@ if( isset($_POST['labAction']) )
 			{
 				$LabGame = processLabGame::loadGame($labGameID);
 
-				// Keep the pieces where they are and only move the calendar
+				// Keep the pieces where they are and only move the calendar. Setting the date by
+				// hand is an editing action, so whatever the engine had worked out about the old
+				// phase - dislodgements, standoffs, the orders on the board - no longer describes
+				// this position and is dropped rather than carried into a phase it did not come from.
 				$Position = $LabGame->getPosition();
+				$Position->clearEngineState();
 				$Position->turn = LabPosition::turnFromYearSeason(
 					isset($_POST['year']) ? (int)$_POST['year'] : 1901,
 					isset($_POST['season']) ? $_POST['season'] : 'Spring'

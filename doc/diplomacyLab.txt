@@ -141,6 +141,9 @@ Added:
                               editor.
   locales/English/lab.php     The Lab's markup and the fallback editor's JavaScript.
   install/DiplomacyLab/lab.sql  The Lab's schema.
+  install/DiplomacyLab/checkSnapshots.php
+                              A command line check that a position survives being snapshotted,
+                              destroyed and restored, for all three phases.
 
   beta-src/src/components/ui/WDLabPanel.tsx      The Lab's controls, drawn over the board.
   beta-src/src/state/interfaces/LabState.ts      What the Lab adds to the board's state.
@@ -197,11 +200,13 @@ The JSON position format
 ------------------------
 
 This is the format used by Export JSON, Import, saved positions and the reset snapshot. It is
-also the format an external program or model would produce to set up a position.
+also the format an external program or model would produce to set up a position. What follows is
+all a position needs; a position read back out of a live game carries more, described under
+"Snapshots" below.
 
   {
     "format": "diplomacy-lab-position",
-    "formatVersion": 1,
+    "formatVersion": 2,
     "name": "France Germany Belgium test",
     "variant": "Classic",
     "variantID": 1,
@@ -242,6 +247,51 @@ So the minimum a generator has to produce is:
   }
 
 
+Snapshots: the rest of the state (format version 2)
+---------------------------------------------------
+
+A position built in the editor is only units, supply centers and a date, and everything else is
+worked out when it is applied. That is all version 1 of the format had, and it is enough for a
+Movement phase - but not for the two phases that are consequences rather than starting points.
+
+A Retreats phase is not "some units are marked as retreating". It is a specific unit dislodged, a
+territory the unit that dislodged it came from (which it may not retreat into), and the standoffs
+that block other destinations. And while the retreat is pending, two units share one territory:
+the dislodged one has not moved, and the one that dislodged it has. A Builds phase is each power's
+unit and supply center counts, and the orders those counts entitle them to.
+
+None of that survives being recalculated, so a position read out of a live game carries it:
+
+  "territoryStatus": [
+    { "territory": "Burgundy", "terrID": 48, "countryID": 2, "standoff": false,
+      "occupiedFromTerrID": 41, "occupyingUnit": 1, "retreatingUnit": 0 }
+  ],
+  "orders": [
+    { "countryID": 2, "type": "Retreat", "unit": 0, "toTerrID": 50,
+      "fromTerrID": null, "viaConvoy": "No" }
+  ],
+  "members": [
+    { "countryID": 2, "status": "Playing", "orderStatus": "",
+      "supplyCenterNo": 2, "unitNo": 1 }
+  ]
+
+"occupyingUnit", "retreatingUnit" and an order's "unit" are *indexes into the "units" list*, not
+territory or unit IDs. They have to be: unit IDs change when a position is written into a game,
+and during a Retreats phase no combination of country, type and territory picks out one unit,
+because two of them are standing in the same place.
+
+Restoring a position that carries these puts them back exactly and recomputes nothing - in
+particular the order generator is not run, because it would throw the orders away and hand out
+empty ones. Restoring a position without them behaves exactly as version 1 did. A version 1 file
+still loads: no "territoryStatus" simply means a position that was built rather than played.
+
+This state belongs to the engine, and the Lab offers no way to write it by hand. Editing a
+position discards it (LabPosition::clearEngineState), and the editor refuses to touch a board that
+is not on a Movement phase, because a retreat or an adjustment only means anything as the outcome
+of the phase before it. The freedom is in choosing a starting position; what follows from it is
+the adjudicator's.
+
+
 API
 ---
 
@@ -279,8 +329,8 @@ leaves webDiplomacy's phase transitions alone: adjudicating a Diplomacy phase wi
 units moves the board to Retreats by itself, and an autumn turn with a unit/supply-center
 difference moves it to Builds by itself, exactly as in a normal game.
 
-What is only partly there is *starting* a position directly in a Retreats phase. A freshly
-applied position has no dislodged units, so a Retreats phase set up from scratch has nothing to
-retreat. Builds set up from scratch works, because build and destroy orders are derived from the
-unit and supply-center counts, which the position defines. Reaching Retreats by resolving into it
-works in all cases.
+Retreats and Builds cannot be *set up* from scratch, and deliberately so. A retreat is the
+consequence of a particular attack succeeding, and an adjustment the consequence of a year's
+gains and losses; neither is a position anyone chooses. So the editor works on Movement phases
+only, and the way to reach the other two is to resolve into them. Once reached they snapshot and
+restore exactly (see "Snapshots" above), which is what lets you return to one and carry on.

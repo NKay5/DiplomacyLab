@@ -36,6 +36,11 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
   const busy = lab.busy !== null;
   const editing = lab.mode === "edit";
 
+  // A position is something you set up; a retreat or an adjustment is something that happened.
+  // Both carry state that only means anything as the outcome of the phase before - which unit was
+  // dislodged, what may be built and where - so the board is only editable on a Movement phase.
+  const canEdit = overview.phase === "Diplomacy";
+
   /** Every power, plus "Neutral", which clears a province or leaves a centre unowned. */
   const countries: { id: number; label: string; colour: string }[] = [
     { id: 0, label: "Neutral", colour: theme.palette.grey[500] },
@@ -97,6 +102,12 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
           <Button
             data-testid="lab-mode-edit"
             color={editing ? "primary" : "inherit"}
+            disabled={busy || !canEdit}
+            title={
+              canEdit
+                ? "Place and remove units, and set who owns each supply centre"
+                : `A ${overview.phase.toLowerCase()} phase follows from the moves before it, so the position cannot be edited here. Resolve it, or Reset.`
+            }
             onClick={() => dispatch(gameApiSliceActions.labSetMode("edit"))}
           >
             Edit position
