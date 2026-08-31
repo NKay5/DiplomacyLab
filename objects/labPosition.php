@@ -701,7 +701,43 @@ class LabPosition
 
 		// Archive the territory status for this turn so the map renders with the right ownership.
 		$Game->archiveTerrStatus();
+		$this->seedPreviousTurnArchive($Game);
 
 		$DB->sql_put("COMMIT");
+	}
+
+	/**
+	 * Give the turn before this one an ownership archive, if it never happened.
+	 *
+	 * The board reads its own history a turn at a time, and the supply centers it shows a Movement
+	 * phase with are the ones archived for the turn *before* it (api/responses/game_state.php
+	 * looks up the turn before each step and throws "no centers found" if it is missing).
+	 * webDiplomacy can rely on that turn having been played; a Lab position cannot, because it may
+	 * start in any year, and then the turn before it never existed. Without something there the
+	 * board cannot read its own history at all: a position starting in 1903 came back as an error
+	 * the moment it was resolved.
+	 *
+	 * So the position's own ownership stands in for it - the same thing webDiplomacy does for the
+	 * turn before the first, where it uses the variant's starting ownership. A turn that really was
+	 * played is left alone: this only fills a gap, it never overwrites history.
+	 *
+	 * @param processGame $Game
+	 */
+	private function seedPreviousTurnArchive($Game)
+	{
+		global $DB;
+
+		$previousTurn = (int)$this->turn - 1;
+
+		if( $previousTurn < 0 ) return;
+
+		list($alreadyArchived) = $DB->sql_row("SELECT COUNT(*) FROM wD_TerrStatusArchive
+			WHERE gameID = ".$Game->id." AND turn = ".$previousTurn);
+
+		if( $alreadyArchived ) return;
+
+		$DB->sql_put("INSERT INTO wD_TerrStatusArchive ( gameID, turn, terrID, countryID, standoff )
+			SELECT gameID, ".$previousTurn.", terrID, countryID, standoff
+			FROM wD_TerrStatus WHERE gameID = ".$Game->id);
 	}
 }
