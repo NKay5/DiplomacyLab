@@ -291,6 +291,19 @@ const labRefusalReason = (error: any): string => {
   return error?.message || "That change could not be made.";
 };
 
+/** Read the analysis tree: what branches this scenario has, and where the board is in it. */
+export const labLoadTree = createAsyncThunk(
+  ApiRoute.LAB_TREE,
+  async (queryParams: { gameID: string }, { rejectWithValue }: any) => {
+    try {
+      const { data } = await getGameApiRequest(ApiRoute.LAB_TREE, queryParams);
+      return data;
+    } catch (error) {
+      return rejectWithValue(labRefusalReason(error));
+    }
+  },
+);
+
 /**
  * Make a lab/* request and bring the board up to date with what the server now holds.
  *
@@ -301,8 +314,14 @@ const labRefusalReason = (error: any): string => {
  * necessarily the newer one. Queueing keeps every click - none is dropped, and the board always
  * ends up showing the position as it now stands.
  *
- * `reload` says how much has changed: an edit only moves units about, while adjudicating also
- * changes the season, the phase and whose turn it is, which the board reads from the overview.
+ * `reload` says how much has changed: an edit only moves units about, adjudicating and stepping
+ * also change the season, the phase and whose turn it is, which the board reads from the overview,
+ * and renaming a branch changes nothing on the board at all. The analysis tree is re-read either
+ * way, because every one of these can move the board within it.
+ *
+ * Adjudicating is the one that can land somewhere else entirely: playing a different continuation
+ * from an earlier position starts a new branch, which has a board of its own. There is nothing to
+ * bring up to date then - the browser is about to be sent there instead.
  */
 let labPending: Promise<unknown> = Promise.resolve();
 
@@ -310,7 +329,7 @@ const labRequest = (
   route: ApiRoute,
   queryParams: { [key: string]: string },
   { dispatch, getState, rejectWithValue }: any,
-  reload: "position" | "everything" = "position",
+  reload: "position" | "everything" | "tree" | "adjudication" = "position",
 ): Promise<any> => {
   const run = async () => {
     let data;
@@ -323,16 +342,22 @@ const labRequest = (
 
     const { overview } = (getState() as RootState).game;
     const gameID = queryParams.gameID || String(overview.gameID);
+    const movedTo = data?.gameID ? String(data.gameID) : gameID;
+
+    if (reload === "adjudication" && movedTo !== gameID) return data;
 
     if (gameID && gameID !== "0") {
-      if (reload === "everything")
-        await dispatch(fetchGameOverview({ gameID }));
+      if (reload !== "tree") {
+        if (reload !== "position")
+          await dispatch(fetchGameOverview({ gameID }));
 
-      const countryID = (getState() as RootState).game.overview.user?.member
-        .countryID;
-      await dispatch(
-        loadGameData(gameID, countryID ? String(countryID) : undefined),
-      );
+        const countryID = (getState() as RootState).game.overview.user?.member
+          .countryID;
+        await dispatch(
+          loadGameData(gameID, countryID ? String(countryID) : undefined),
+        );
+      }
+      await dispatch(labLoadTree({ gameID }));
     }
 
     return data;
@@ -366,29 +391,47 @@ export const labEditProvince = createAsyncThunk(
   ) => labRequest(ApiRoute.LAB_EDIT_PROVINCE, queryParams, thunkAPI),
 );
 
-export const labResolve = createAsyncThunk(
-  ApiRoute.LAB_RESOLVE,
+/**
+ * Adjudicate.
+ *
+ * This is the only thing that moves a Lab board on, and it does what the board shows: every
+ * power's orders are already saved by the time it runs, so the engine sees exactly what is on
+ * screen. Where the result belongs in the analysis is the server's decision - the next position of
+ * this branch, or the start of a new one if this position has already been played from.
+ */
+export const labReady = createAsyncThunk(
+  ApiRoute.LAB_READY,
   async (queryParams: { gameID: string }, thunkAPI) =>
-    labRequest(ApiRoute.LAB_RESOLVE, queryParams, thunkAPI, "everything"),
+    labRequest(ApiRoute.LAB_READY, queryParams, thunkAPI, "adjudication"),
 );
 
-export const labReset = createAsyncThunk(
-  ApiRoute.LAB_RESET,
-  async (queryParams: { gameID: string }, thunkAPI) =>
-    labRequest(ApiRoute.LAB_RESET, queryParams, thunkAPI, "everything"),
+/** Step to the position before or after this one, on the same branch. */
+export const labStep = createAsyncThunk(
+  ApiRoute.LAB_STEP,
+  async (queryParams: { gameID: string; direction: string }, thunkAPI) =>
+    labRequest(ApiRoute.LAB_STEP, queryParams, thunkAPI, "everything"),
 );
 
-export const labDuplicate = createAsyncThunk(
-  ApiRoute.LAB_DUPLICATE,
-  async (
-    queryParams: { gameID: string; name: string },
-    { rejectWithValue },
-  ) => {
-    // The copy is a different board, which the browser is about to be sent to, so there is nothing
-    // here to bring up to date.
+/** Show a particular position of the current branch. */
+export const labSelectNode = createAsyncThunk(
+  ApiRoute.LAB_SELECT_NODE,
+  async (queryParams: { gameID: string; nodeID: string }, thunkAPI) =>
+    labRequest(ApiRoute.LAB_SELECT_NODE, queryParams, thunkAPI, "everything"),
+);
+
+/**
+ * Switch to another branch.
+ *
+ * Each branch plays on its own board, so this answers with a different gameID and the browser is
+ * sent there; nothing here needs bringing up to date.
+ */
+export const labSelectBranch = createAsyncThunk(
+  ApiRoute.LAB_SELECT_BRANCH,
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  async (queryParams: { branchID: string }, { rejectWithValue }: any) => {
     try {
       const { data } = await getGameApiRequest(
-        ApiRoute.LAB_DUPLICATE,
+        ApiRoute.LAB_SELECT_BRANCH,
         queryParams,
       );
       return data;
@@ -398,20 +441,18 @@ export const labDuplicate = createAsyncThunk(
   },
 );
 
-export const labSavePosition = createAsyncThunk(
-  ApiRoute.LAB_SAVE,
+export const labRenameBranch = createAsyncThunk(
+  ApiRoute.LAB_RENAME_BRANCH,
   async (
-    queryParams: { gameID: string; name: string },
-    { rejectWithValue },
-  ) => {
-    // Saving copies the position aside; the board itself is unchanged.
-    try {
-      const { data } = await getGameApiRequest(ApiRoute.LAB_SAVE, queryParams);
-      return data;
-    } catch (error) {
-      return rejectWithValue(labRefusalReason(error));
-    }
-  },
+    queryParams: { gameID: string; branchID: string; name: string },
+    thunkAPI,
+  ) => labRequest(ApiRoute.LAB_RENAME_BRANCH, queryParams, thunkAPI, "tree"),
+);
+
+export const labDeleteBranch = createAsyncThunk(
+  ApiRoute.LAB_DELETE_BRANCH,
+  async (queryParams: { gameID: string; branchID: string }, thunkAPI) =>
+    labRequest(ApiRoute.LAB_DELETE_BRANCH, queryParams, thunkAPI, "tree"),
 );
 
 /**
@@ -431,13 +472,14 @@ const showLatestPhase = (state: GameState): void => {
 };
 
 /**
- * Leave edit mode if the board has moved to a phase that cannot be edited.
+ * Leave edit mode if the board is on a position that cannot be edited.
  *
- * Retreats and adjustments follow from the moves before them, so there is nothing to hand-edit
- * there; landing on one with the editor still open would offer a click that only ever fails.
+ * Retreats and adjustments follow from the moves before them, and a position that has already been
+ * played from is history; landing on either with the editor still open would offer a click that
+ * only ever fails.
  */
 const settleLabMode = (state: GameState): void => {
-  if (state.lab.mode === "edit" && state.overview.phase !== "Diplomacy")
+  if (state.lab.mode === "edit" && !state.lab.canEdit)
     state.lab.mode = "orders";
 };
 
@@ -482,6 +524,12 @@ const gameApiSlice = createSlice({
     },
     labClearError(state) {
       state.lab.error = null;
+    },
+    labClearNotice(state) {
+      state.lab.notice = null;
+    },
+    labSetNotice(state, action) {
+      state.lab.notice = action.payload;
     },
     processMessagesSeen(state, action) {
       const countryID = action.payload;
@@ -583,54 +631,90 @@ const gameApiSlice = createSlice({
         state.lab.busy = null;
         state.lab.error = labErrorMessage(action);
       })
-      .addCase(labResolve.pending, (state) => {
-        state.lab.busy = "resolve";
-        state.lab.error = null;
+      // The tree is re-read after everything, so this is where the navigation bar comes from.
+      .addCase(labLoadTree.fulfilled, (state, action) => {
+        const tree = action.payload;
+        if (!tree || !tree.current) return;
+        state.lab.branches = tree.branches || [];
+        state.lab.place = tree.current;
+        state.lab.canEdit = !!tree.canEdit;
+        settleLabMode(state);
       })
-      .addCase(labResolve.fulfilled, (state) => {
+      .addCase(labReady.pending, (state) => {
+        state.lab.busy = "ready";
+        state.lab.error = null;
+        state.lab.notice = null;
+      })
+      .addCase(labReady.fulfilled, (state, action) => {
         state.lab.busy = null;
         // Adjudicating leaves the board on the phase that was just resolved, showing the arrows
         // and bounces of what happened. In the Lab the point is to see where that leaves the
         // position, so the board moves on to it; the phase controls step back to the results.
         showLatestPhase(state);
         settleLabMode(state);
+        const created = action.payload?.branchCreated;
+        if (created) state.lab.notice = `New branch created: ${created}`;
       })
-      .addCase(labResolve.rejected, (state, action) => {
+      .addCase(labReady.rejected, (state, action) => {
         state.lab.busy = null;
         state.lab.error = labErrorMessage(action);
       })
-      .addCase(labReset.pending, (state) => {
-        state.lab.busy = "reset";
+      .addCase(labStep.pending, (state) => {
+        state.lab.busy = "step";
         state.lab.error = null;
       })
-      .addCase(labReset.fulfilled, (state) => {
+      .addCase(labStep.fulfilled, (state) => {
         state.lab.busy = null;
         showLatestPhase(state);
         settleLabMode(state);
       })
-      .addCase(labReset.rejected, (state, action) => {
+      .addCase(labStep.rejected, (state, action) => {
         state.lab.busy = null;
         state.lab.error = labErrorMessage(action);
       })
-      .addCase(labSavePosition.pending, (state) => {
-        state.lab.busy = "save";
+      .addCase(labSelectNode.pending, (state) => {
+        state.lab.busy = "step";
         state.lab.error = null;
       })
-      .addCase(labSavePosition.fulfilled, (state) => {
+      .addCase(labSelectNode.fulfilled, (state) => {
         state.lab.busy = null;
+        showLatestPhase(state);
+        settleLabMode(state);
       })
-      .addCase(labSavePosition.rejected, (state, action) => {
+      .addCase(labSelectNode.rejected, (state, action) => {
         state.lab.busy = null;
         state.lab.error = labErrorMessage(action);
       })
-      .addCase(labDuplicate.pending, (state) => {
-        state.lab.busy = "duplicate";
+      .addCase(labSelectBranch.pending, (state) => {
+        state.lab.busy = "branch";
         state.lab.error = null;
       })
-      .addCase(labDuplicate.fulfilled, (state) => {
+      .addCase(labSelectBranch.fulfilled, (state) => {
         state.lab.busy = null;
       })
-      .addCase(labDuplicate.rejected, (state, action) => {
+      .addCase(labSelectBranch.rejected, (state, action) => {
+        state.lab.busy = null;
+        state.lab.error = labErrorMessage(action);
+      })
+      .addCase(labRenameBranch.pending, (state) => {
+        state.lab.busy = "branch";
+        state.lab.error = null;
+      })
+      .addCase(labRenameBranch.fulfilled, (state) => {
+        state.lab.busy = null;
+      })
+      .addCase(labRenameBranch.rejected, (state, action) => {
+        state.lab.busy = null;
+        state.lab.error = labErrorMessage(action);
+      })
+      .addCase(labDeleteBranch.pending, (state) => {
+        state.lab.busy = "branch";
+        state.lab.error = null;
+      })
+      .addCase(labDeleteBranch.fulfilled, (state) => {
+        state.lab.busy = null;
+      })
+      .addCase(labDeleteBranch.rejected, (state, action) => {
         state.lab.busy = null;
         state.lab.error = labErrorMessage(action);
       })

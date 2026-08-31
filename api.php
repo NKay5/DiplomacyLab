@@ -505,37 +505,207 @@ class SandboxDelete extends ApiEntry {
  *
  * Diplomacy Lab turns a webDiplomacy sandbox game into a free tactical analysis board. These
  * entries all work on the same currency: a Lab position, in the JSON format documented in
- * doc/diplomacyLab.txt. Everything checks ownership internally via processLabGame::loadGame().
+ * doc/diplomacyLab.txt. Everything checks ownership internally, via processLabGame::loadGame()
+ * for the board and libLabTree for the analysis tree.
  *
- * None of these entries contain adjudication logic. lab/resolve hands the position to
+ * None of these entries contain adjudication logic. lab/ready hands the position to
  * processGame::process(), which is webDiplomacy's own unmodified adjudicator.
  */
-class LabCreate extends ApiEntry {
+
+/**
+ * What the board is told about where it is in the tree, after anything that could move it.
+ *
+ * @param array $context a libLabTree context
+ * @param string|null $branchCreated the name of a branch that was just started, if any
+ * @return array
+ */
+function labContextResponse($context, $branchCreated = null)
+{
+	return array(
+		'scenarioID' => (int)$context['scenarioID'],
+		'scenarioName' => $context['scenarioName'],
+		'branchID' => (int)$context['branchID'],
+		'branchName' => $context['branchName'],
+		'gameID' => (int)$context['gameID'],
+		'nodeID' => (int)$context['currentNodeID'],
+		'headNodeID' => (int)$context['headNodeID'],
+		'atHead' => ((int)$context['currentNodeID'] === (int)$context['headNodeID']),
+		'branchCreated' => $branchCreated
+	);
+}
+
+class LabNewScenario extends ApiEntry {
 	public function __construct() {
-		parent::__construct('lab/create', 'GET', '', array('variantID', 'name'), true);
+		parent::__construct('lab/scenario/new', 'GET', '', array('variantID', 'name'), true);
 	}
 	public function run($userID, $permissionIsExplicit) {
-		require_once(l_r('gamemaster/labGame.php'));
-		require_once(l_r('lib/lab.php'));
+		require_once(l_r('lib/labTree.php'));
 
 		$args = $this->getArgs();
 		$variantID = isset($args['variantID']) && (int)$args['variantID'] > 0 ? (int)$args['variantID'] : 1;
-
-		$LabGame = processLabGame::createGame($variantID);
-
-		// A new Lab board starts completely empty: no units, no owned supply centers, Spring 1901.
-		// That is the blank canvas the Lab is for; the default 1901 opening position is one click
-		// away via the position editor if it is wanted.
-		$Position = new LabPosition($LabGame->Variant);
-		$Position->turn = 0;
-		$Position->phase = 'Diplomacy';
-		$LabGame->setPosition($Position);
-
 		$name = isset($args['name']) ? $args['name'] : '';
-		if( libLab::trimName($name) === '' ) $name = 'Position '.date('Y-m-d H:i');
-		libLab::registerGame($LabGame->id, $name);
 
-		return json_encode(array('gameID' => $LabGame->id, 'name' => libLab::trimName($name)));
+		$context = libLabTree::createScenario($name, $variantID);
+
+		return json_encode(labContextResponse($context));
+	}
+}
+
+class LabListScenarios extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/scenario/list', 'GET', '', array(), false);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		return json_encode(array('scenarios' => libLabTree::listScenarios()));
+	}
+}
+
+/**
+ * API entry lab/tree
+ *
+ * Everything the board's navigation needs: which scenario this board belongs to, what branches it
+ * has, the positions on each of them in order, and where the board currently is.
+ */
+class LabTree extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/tree', 'GET', '', array('gameID'), false);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		$args = $this->getArgs();
+		$context = libLabTree::contextOf((int)$args['gameID']);
+
+		if( !$context )
+			return json_encode(array('scenarioID' => null, 'branches' => array()));
+
+		$tree = libLabTree::tree($context['scenarioID']);
+		$tree['current'] = labContextResponse($context);
+		$tree['canEdit'] = ( libLabTree::editRefusal($context, $this->currentPhase((int)$args['gameID'])) === true );
+
+		return json_encode($tree);
+	}
+
+	private function currentPhase($gameID) {
+		global $DB;
+		list($phase) = $DB->sql_row("SELECT phase FROM wD_Games WHERE id = ".(int)$gameID);
+		return $phase;
+	}
+}
+
+/**
+ * API entry lab/ready
+ *
+ * The one thing that adjudicates a Lab board. Every power's orders are already in the database;
+ * this hands them to webDiplomacy's adjudicator and records where the result belongs in the tree.
+ * At the end of a branch that is the branch's next position; anywhere else it is the start of a
+ * new branch, so that going back and trying something else never overwrites what is already there.
+ */
+class LabReady extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/ready', 'GET', '', array('gameID'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		$args = $this->getArgs();
+		$result = libLabTree::ready((int)$args['gameID']);
+
+		return json_encode(labContextResponse($result['context'], $result['branchCreated']));
+	}
+}
+
+/**
+ * API entry lab/step
+ *
+ * The position before or after this one on the same branch. Nothing in the tree changes: the
+ * branch's board is simply rebuilt from the position that was asked for.
+ */
+class LabStep extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/step', 'GET', '', array('gameID', 'direction'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		$args = $this->getArgs();
+		$step = ( isset($args['direction']) && $args['direction'] === 'previous' ) ? -1 : 1;
+
+		$context = libLabTree::step((int)$args['gameID'], $step);
+
+		return json_encode(labContextResponse($context));
+	}
+}
+
+class LabSelectBranch extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/branch/select', 'GET', '', array('branchID'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		$args = $this->getArgs();
+		$context = libLabTree::selectBranch((int)$args['branchID']);
+
+		return json_encode(labContextResponse($context));
+	}
+}
+
+class LabSelectNode extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/node/select', 'GET', '', array('nodeID'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		$args = $this->getArgs();
+		$context = libLabTree::selectNode((int)$args['nodeID']);
+
+		return json_encode(labContextResponse($context));
+	}
+}
+
+class LabRenameBranch extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/branch/rename', 'GET', '', array('branchID', 'name'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		$args = $this->getArgs();
+		libLabTree::renameBranch((int)$args['branchID'], isset($args['name']) ? $args['name'] : '');
+
+		return json_encode(array('branchID' => (int)$args['branchID']));
+	}
+}
+
+class LabDeleteBranch extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/branch/delete', 'GET', '', array('branchID'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		$args = $this->getArgs();
+		libLabTree::deleteBranch((int)$args['branchID']);
+
+		return json_encode(array('branchID' => (int)$args['branchID']));
+	}
+}
+
+class LabDeleteScenario extends ApiEntry {
+	public function __construct() {
+		parent::__construct('lab/scenario/delete', 'GET', '', array('scenarioID'), true);
+	}
+	public function run($userID, $permissionIsExplicit) {
+		require_once(l_r('lib/labTree.php'));
+
+		$args = $this->getArgs();
+		libLabTree::deleteScenario((int)$args['scenarioID']);
+
+		return json_encode(array('scenarioID' => (int)$args['scenarioID']));
 	}
 }
 
@@ -559,7 +729,7 @@ class LabSetPosition extends ApiEntry {
 	}
 	public function run($userID, $permissionIsExplicit) {
 		require_once(l_r('gamemaster/labGame.php'));
-		require_once(l_r('lib/lab.php'));
+		require_once(l_r('lib/labTree.php'));
 
 		$args = $this->getArgs();
 		$LabGame = processLabGame::loadGame((int)$args['gameID']);
@@ -567,91 +737,18 @@ class LabSetPosition extends ApiEntry {
 		if( !isset($args['position']) )
 			throw new RequestException('No position given.');
 
+		$context = libLabTree::contextOf($LabGame->id);
+		$refusal = libLabTree::editRefusal($context, $LabGame->phase);
+		if( $refusal !== true ) throw new RequestException($refusal);
+
 		$Position = LabPosition::fromArray((array)$args['position'], $LabGame->variantID);
 		$LabGame->setPosition($Position);
 
-		// Editing the position invalidates any reset point: the position you just built is now the
-		// one RESET should come back to, and it will be snapshotted on the next RESOLVE.
-		libLab::saveSnapshot($LabGame->id, $Position);
+		// The tree records positions, so the position this board is on has to follow the board.
+		libLabTree::positionEdited($LabGame->id);
 		libLab::touchGame($LabGame->id);
 
 		return $LabGame->getPosition()->toJSON();
-	}
-}
-
-class LabResolve extends ApiEntry {
-	public function __construct() {
-		parent::__construct('lab/resolve', 'GET', '', array('gameID'), true);
-	}
-	public function run($userID, $permissionIsExplicit) {
-		require_once(l_r('gamemaster/labGame.php'));
-		require_once(l_r('lib/lab.php'));
-
-		$args = $this->getArgs();
-		$LabGame = processLabGame::loadGame((int)$args['gameID']);
-
-		// Snapshot the position before adjudicating; this is what RESET restores.
-		libLab::saveSnapshot($LabGame->id, $LabGame->getPosition());
-
-		$LabGame->resolve();
-
-		libLab::touchGame($LabGame->id);
-
-		return json_encode(array(
-			'gameID' => $LabGame->id,
-			'turn' => (int)$LabGame->turn,
-			'phase' => $LabGame->phase
-		));
-	}
-}
-
-class LabReset extends ApiEntry {
-	public function __construct() {
-		parent::__construct('lab/reset', 'GET', '', array('gameID'), true);
-	}
-	public function run($userID, $permissionIsExplicit) {
-		require_once(l_r('gamemaster/labGame.php'));
-		require_once(l_r('lib/lab.php'));
-
-		$args = $this->getArgs();
-		$LabGame = processLabGame::loadGame((int)$args['gameID']);
-
-		$Position = libLab::loadSnapshot($LabGame->id);
-		if( $Position === false )
-			throw new RequestException('This position has not been resolved yet, so there is nothing to reset to.');
-
-		$LabGame->setPosition($Position);
-		libLab::touchGame($LabGame->id);
-
-		return json_encode(array(
-			'gameID' => $LabGame->id,
-			'turn' => (int)$LabGame->turn,
-			'phase' => $LabGame->phase
-		));
-	}
-}
-
-class LabDuplicate extends ApiEntry {
-	public function __construct() {
-		parent::__construct('lab/duplicate', 'GET', '', array('gameID', 'name'), true);
-	}
-	public function run($userID, $permissionIsExplicit) {
-		require_once(l_r('gamemaster/labGame.php'));
-		require_once(l_r('lib/lab.php'));
-
-		$args = $this->getArgs();
-		$LabGame = processLabGame::loadGame((int)$args['gameID']);
-
-		$Copy = $LabGame->duplicateGame();
-
-		$source = libLab::getGame($LabGame->id);
-		$name = isset($args['name']) && libLab::trimName($args['name']) !== ''
-			? $args['name']
-			: (($source ? $source['name'] : 'Position').' (copy)');
-
-		libLab::registerGame($Copy->id, $name);
-
-		return json_encode(array('gameID' => $Copy->id, 'name' => libLab::trimName($name)));
 	}
 }
 
@@ -669,7 +766,7 @@ class LabEditProvince extends ApiEntry {
 	}
 	public function run($userID, $permissionIsExplicit) {
 		require_once(l_r('gamemaster/labGame.php'));
-		require_once(l_r('lib/lab.php'));
+		require_once(l_r('lib/labTree.php'));
 
 		$args = $this->getArgs();
 		$LabGame = processLabGame::loadGame((int)$args['gameID']);
@@ -683,10 +780,13 @@ class LabEditProvince extends ApiEntry {
 		 * and where - that only means anything as the outcome of the phase before. Moving pieces
 		 * around underneath that state would leave a board describing a situation that could not
 		 * have happened, so editing is offered on a Movement phase only.
+		 *
+		 * A position that has already been played from is history for the same reason: editing it
+		 * would change what the positions after it grew out of.
 		 */
-		if( $Position->phase !== 'Diplomacy' )
-			throw new RequestException('A position can only be edited during a Movement phase. '
-				.'Reset the board, or resolve this phase first.');
+		$context = libLabTree::contextOf($LabGame->id);
+		$refusal = libLabTree::editRefusal($context, $Position->phase);
+		if( $refusal !== true ) throw new RequestException($refusal);
 
 		$terrID = (int)$args['terrID'];
 		$territories = $Position->territories();
@@ -808,59 +908,11 @@ class LabEditProvince extends ApiEntry {
 
 		$LabGame->setPosition($Position);
 
-		// Editing the position makes it the point RESET returns to.
-		libLab::saveSnapshot($LabGame->id, $Position);
+		// The tree records positions, so the position this board is on has to follow the board.
+		libLabTree::positionEdited($LabGame->id);
 		libLab::touchGame($LabGame->id);
 
 		return $LabGame->getPosition()->toJSON();
-	}
-}
-
-/**
- * API entry lab/save
- *
- * Keep the position on the board under a name, so it can be opened again later.
- */
-class LabSavePosition extends ApiEntry {
-	public function __construct() {
-		parent::__construct('lab/save', 'GET', '', array('gameID', 'name'), true);
-	}
-	public function run($userID, $permissionIsExplicit) {
-		require_once(l_r('gamemaster/labGame.php'));
-		require_once(l_r('lib/lab.php'));
-
-		$args = $this->getArgs();
-		$LabGame = processLabGame::loadGame((int)$args['gameID']);
-
-		$labRecord = libLab::getGame($LabGame->id);
-		$name = isset($args['name']) && libLab::trimName($args['name']) !== ''
-			? $args['name']
-			: ($labRecord ? $labRecord['name'] : '');
-
-		$positionID = libLab::savePosition($LabGame->getPosition(), $name);
-
-		return json_encode(array('positionID' => $positionID, 'name' => libLab::trimName($name)));
-	}
-}
-
-class LabDelete extends ApiEntry {
-	public function __construct() {
-		parent::__construct('lab/delete', 'GET', '', array('gameID'), true);
-	}
-	public function run($userID, $permissionIsExplicit) {
-		require_once(l_r('gamemaster/labGame.php'));
-		require_once(l_r('lib/lab.php'));
-
-		$args = $this->getArgs();
-		$gameID = (int)$args['gameID'];
-
-		// loadGame() enforces that the position belongs to this user before anything is erased
-		$LabGame = processLabGame::loadGame($gameID);
-
-		libLab::forgetGame($gameID);
-		$LabGame->deleteGame();
-
-		return json_encode(array('gameID' => $gameID));
 	}
 }
 
@@ -2526,15 +2578,19 @@ try {
 	$api->load(new SandboxCopy());
 	$api->load(new SandboxMoveTurnBack());
 	$api->load(new SandboxDelete());
-	$api->load(new LabCreate());
+	$api->load(new LabNewScenario());
+	$api->load(new LabListScenarios());
+	$api->load(new LabTree());
+	$api->load(new LabReady());
+	$api->load(new LabStep());
+	$api->load(new LabSelectBranch());
+	$api->load(new LabSelectNode());
+	$api->load(new LabRenameBranch());
+	$api->load(new LabDeleteBranch());
+	$api->load(new LabDeleteScenario());
 	$api->load(new LabGetPosition());
 	$api->load(new LabSetPosition());
-	$api->load(new LabResolve());
-	$api->load(new LabReset());
-	$api->load(new LabDuplicate());
-	$api->load(new LabDelete());
 	$api->load(new LabEditProvince());
-	$api->load(new LabSavePosition());
 
 	// Track API call metrics
 	$apiStartTime = microtime(true);

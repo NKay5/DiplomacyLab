@@ -5,10 +5,12 @@ import { useAppDispatch, useAppSelector } from "../../state/hooks";
 import {
   gameApiSliceActions,
   gameData,
+  gameLab,
   gameOrdersMeta,
   gameOverview,
   gameStatus,
   gameViewedPhase,
+  labReady,
   saveOrders,
 } from "../../state/game/game-api-slice";
 import UpdateOrder from "../../interfaces/state/UpdateOrder";
@@ -36,6 +38,7 @@ const WDOrderStatusControls: React.FC<WDOrderStatsControlsProps> = function ({
   const ordersMeta = useAppSelector(gameOrdersMeta);
   const status = useAppSelector(gameStatus);
   const viewedPhaseState = useAppSelector(gameViewedPhase);
+  const lab = useAppSelector(gameLab);
   const savingOrdersInProgress = useAppSelector(
     (state) => state.game.savingOrdersInProgress,
   );
@@ -70,7 +73,16 @@ const WDOrderStatusControls: React.FC<WDOrderStatsControlsProps> = function ({
       (overview.phase === "Builds" && extraSCs > 0));
 
   // orderStatus contains what the server thinks our order status is.
-  if (savingOrdersInProgress === "readying") {
+  if (lab.enabled) {
+    // In the Lab one person enters every power's orders, so there is nobody to wait for and
+    // nothing to be ready *for*: this button is what adjudicates. It saves whatever is on the
+    // board and hands it straight to the engine, so the result is always of the orders on screen.
+    readyEnabled = viewingCurPhase && !lab.busy && !savingOrdersInProgress;
+    saveEnabled = viewingCurPhase && canSave;
+    readyButtonText = lab.busy === "ready" ? "Adjudicating..." : "Ready";
+    saveButtonText =
+      savingOrdersInProgress === "saving" ? "Saving..." : saveText;
+  } else if (savingOrdersInProgress === "readying") {
     readyEnabled = false;
     saveEnabled = false;
     readyButtonText = "Readying...";
@@ -105,6 +117,23 @@ const WDOrderStatusControls: React.FC<WDOrderStatsControlsProps> = function ({
   const doAnimateGlow =
     saveEnabled && ordersLength !== ordersSaved && !currentOrderInProgress;
 
+  /** Adjudicate this Lab board, once the orders on it have reached the server. */
+  const adjudicateLab = () => {
+    dispatch(labReady({ gameID: String(overview.gameID) })).then((action) => {
+      const place = action.payload as
+        | { gameID?: number; branchCreated?: string | null }
+        | undefined;
+      // Playing a different continuation from an earlier position starts a new branch, which has
+      // a board of its own; the notice travels with the browser so it can be shown on arrival.
+      if (place?.gameID && String(place.gameID) !== String(overview.gameID)) {
+        const branch = place.branchCreated
+          ? `&newBranch=${encodeURIComponent(place.branchCreated)}`
+          : "";
+        window.location.search = `?gameID=${place.gameID}&lab=1${branch}`;
+      }
+    });
+  };
+
   const clickButton = (whatButton: OrderStatusButton) => {
     // console.log("Entered save button click");
     // When you click save or ready, it should clear any actively entered order you have going,
@@ -112,13 +141,16 @@ const WDOrderStatusControls: React.FC<WDOrderStatsControlsProps> = function ({
     // stay with a partially-entered order.
     dispatch(gameApiSliceActions.resetOrder());
 
+    const isLabAdjudication =
+      lab.enabled && whatButton === OrderStatusButton.READY;
+
     if ("currentOrders" in data && "contextVars" in data) {
       const { currentOrders, contextVars } = data;
       if (contextVars && currentOrders) {
         const orderUpdates: UpdateOrder[] = [];
         currentOrders.forEach(
           ({ fromTerrID, id, toTerrID, type: moveType, unitID, viaConvoy }) => {
-            const updateReference = ordersMeta[id].update;
+            const updateReference = ordersMeta[id]?.update;
             let orderUpdate: UpdateOrder = {
               fromTerrID,
               id,
@@ -143,7 +175,11 @@ const WDOrderStatusControls: React.FC<WDOrderStatsControlsProps> = function ({
           queryParams: {},
           userIntent: "saving",
         };
-        if (whatButton === OrderStatusButton.READY) {
+        // The Lab never readies a member. Readying is webDiplomacy's way of waiting for the other
+        // players, and it locks the board until every one of them has finished; here there is only
+        // one person, and the orders are wanted now. So the orders are saved as orders, and the
+        // adjudication follows once they are safely stored.
+        if (whatButton === OrderStatusButton.READY && !lab.enabled) {
           if (orderStatus.Ready) {
             orderSubmission.queryParams = { notready: "on" };
             orderSubmission.userIntent = "unreadying";
@@ -153,9 +189,15 @@ const WDOrderStatusControls: React.FC<WDOrderStatsControlsProps> = function ({
           }
         }
         // console.log({ orderSubmission });
-        dispatch(saveOrders(orderSubmission));
+        const saving = dispatch(saveOrders(orderSubmission));
+        if (isLabAdjudication) saving.then(adjudicateLab);
+        return;
       }
     }
+
+    // A phase can legitimately have no orders at all - an empty board, or a Builds phase nobody
+    // owes anything in. There is nothing to save, but there is still something to adjudicate.
+    if (isLabAdjudication) adjudicateLab();
   };
 
   useEffect(() => {

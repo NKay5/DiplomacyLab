@@ -185,6 +185,10 @@ const initialState: GameState = {
     unitType: "Auto",
     busy: null,
     error: null,
+    notice: null,
+    branches: [],
+    place: null,
+    canEdit: true,
   },
 };
 

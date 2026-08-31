@@ -1,13 +1,21 @@
 import * as React from "react";
-import { Box, Button, ButtonGroup, Typography, useTheme } from "@mui/material";
+import {
+  Box,
+  Button,
+  ButtonGroup,
+  MenuItem,
+  Select,
+  Typography,
+  useTheme,
+} from "@mui/material";
 import {
   gameLab,
   gameOverview,
   gameApiSliceActions,
-  labResolve,
-  labReset,
-  labDuplicate,
-  labSavePosition,
+  labStep,
+  labSelectBranch,
+  labRenameBranch,
+  labDeleteBranch,
 } from "../../state/game/game-api-slice";
 import { useAppDispatch, useAppSelector } from "../../state/hooks";
 import { LabTool, LabUnitType } from "../../state/interfaces/LabState";
@@ -16,11 +24,16 @@ import { LabTool, LabUnitType } from "../../state/interfaces/LabState";
  * Diplomacy Lab's controls, on the board itself.
  *
  * The board is the whole application here, so everything the Lab does is reachable without leaving
- * it: build a position, order every power, adjudicate, and step back to try something else.
+ * it: build a position, order every power, adjudicate it with Ready, and walk back through what
+ * has been played to try something else.
  *
  * EDIT POSITION and ORDERS are the two things a click can mean. In ORDERS the board behaves exactly
  * as webDiplomacy's board always has. In EDIT a click puts the selected power's unit on the
  * province, or takes what is there away.
+ *
+ * The rest is the analysis: which branch is being shown, and where along it. Stepping back and
+ * adjudicating a different continuation starts a new branch by itself, so nothing that has been
+ * played is ever overwritten and there is no gameID for anyone to keep track of.
  */
 const WDLabPanel: React.FC = function (): React.ReactElement | null {
   const theme = useTheme();
@@ -30,16 +43,30 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
 
   const [collapsed, setCollapsed] = React.useState(false);
 
+  // A new branch is worth mentioning, but not worth interrupting anyone over: it says so for long
+  // enough to be read on the way past, and then goes.
+  React.useEffect(() => {
+    if (!lab.notice) return undefined;
+    const timer = window.setTimeout(
+      () => dispatch(gameApiSliceActions.labClearNotice()),
+      12000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [lab.notice]);
+
   if (!lab.enabled) return null;
 
   const gameID = String(overview.gameID);
   const busy = lab.busy !== null;
   const editing = lab.mode === "edit";
+  const { place, branches, canEdit } = lab;
 
-  // A position is something you set up; a retreat or an adjustment is something that happened.
-  // Both carry state that only means anything as the outcome of the phase before - which unit was
-  // dislodged, what may be built and where - so the board is only editable on a Movement phase.
-  const canEdit = overview.phase === "Diplomacy";
+  const branch = branches.find((b) => b.id === place?.branchID);
+  const nodes = branch ? branch.nodes : [];
+  const nodeIdx = nodes.findIndex((n) => n.id === place?.nodeID);
+  const here = nodeIdx >= 0 ? nodes[nodeIdx] : null;
+  const hasPrevious = nodeIdx > 0;
+  const hasNext = nodeIdx >= 0 && nodeIdx < nodes.length - 1;
 
   /** Every power, plus "Neutral", which clears a province or leaves a centre unowned. */
   const countries: { id: number; label: string; colour: string }[] = [
@@ -80,7 +107,7 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
     borderRadius: 8,
     boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
     padding: "8px 12px",
-    maxWidth: "min(96vw, 900px)",
+    maxWidth: "min(96vw, 940px)",
   };
 
   if (collapsed) {
@@ -93,6 +120,23 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
     );
   }
 
+  /** Why the editor is or is not offered, in a sentence. */
+  let editHint = "Place and remove units, and set who owns each supply centre";
+  if (!canEdit)
+    editHint =
+      overview.phase === "Diplomacy"
+        ? "This position has already been played from. Ready to try a different continuation, or step forward to the end of this branch."
+        : `A ${overview.phase.toLowerCase()} phase follows from the moves before it, so the position cannot be edited here.`;
+
+  const openBranch = (branchID: number) => {
+    dispatch(labSelectBranch({ branchID: String(branchID) })).then((action) => {
+      const newGameID = (action.payload as { gameID?: number })?.gameID;
+      // lab=1 has to come along, or the branch opens as an ordinary board with none of the
+      // Lab's controls.
+      if (newGameID) window.location.search = `?gameID=${newGameID}&lab=1`;
+    });
+  };
+
   return (
     <Box sx={panel} data-testid="lab-panel">
       <Box
@@ -103,11 +147,7 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
             data-testid="lab-mode-edit"
             color={editing ? "primary" : "inherit"}
             disabled={busy || !canEdit}
-            title={
-              canEdit
-                ? "Place and remove units, and set who owns each supply centre"
-                : `A ${overview.phase.toLowerCase()} phase follows from the moves before it, so the position cannot be edited here. Resolve it, or Reset.`
-            }
+            title={editHint}
             onClick={() => dispatch(gameApiSliceActions.labSetMode("edit"))}
           >
             Edit position
@@ -121,65 +161,113 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
           </Button>
         </ButtonGroup>
 
-        <Button
-          data-testid="lab-resolve"
-          size="small"
-          variant="contained"
-          color="success"
-          disabled={busy}
-          onClick={() => dispatch(labResolve({ gameID }))}
-        >
-          {lab.busy === "resolve" ? "Resolving…" : "Resolve"}
-        </Button>
+        {place && (
+          <>
+            <Select
+              data-testid="lab-branch"
+              size="small"
+              disabled={busy}
+              value={place.branchID}
+              onChange={(e) => openBranch(Number(e.target.value))}
+              sx={{ minWidth: 96, height: 30, background: "#fff" }}
+              title="The line of play being shown"
+            >
+              {branches.map((b) => (
+                <MenuItem
+                  key={b.id}
+                  value={b.id}
+                  data-testid={`lab-branch-${b.id}`}
+                >
+                  {b.name}
+                </MenuItem>
+              ))}
+            </Select>
 
-        <Button
-          data-testid="lab-reset"
-          size="small"
-          variant="outlined"
-          disabled={busy}
-          onClick={() => dispatch(labReset({ gameID }))}
-          title="Go back to the position as it was before the last adjudication"
-        >
-          Reset
-        </Button>
+            <ButtonGroup size="small" variant="outlined" disabled={busy}>
+              <Button
+                data-testid="lab-previous"
+                disabled={busy || !hasPrevious}
+                onClick={() =>
+                  dispatch(labStep({ gameID, direction: "previous" }))
+                }
+                title="The position before this one on this branch"
+              >
+                ← Previous
+              </Button>
+              <Button
+                data-testid="lab-next"
+                disabled={busy || !hasNext}
+                onClick={() => dispatch(labStep({ gameID, direction: "next" }))}
+                title="The position after this one on this branch"
+              >
+                Next →
+              </Button>
+            </ButtonGroup>
 
-        <Button
-          data-testid="lab-duplicate"
-          size="small"
-          variant="outlined"
-          disabled={busy}
-          onClick={() => {
-            const name = window.prompt(
-              "Name for the copy",
-              `${overview.name || "Position"} (variation)`,
-            );
-            if (name === null) return;
-            dispatch(labDuplicate({ gameID, name })).then((action) => {
-              const newGameID = (action.payload as { gameID?: number })?.gameID;
-              // lab=1 has to come along, or the copy opens as an ordinary board with none of
-              // the Lab's controls.
-              if (newGameID)
-                window.location.search = `?gameID=${newGameID}&lab=1`;
-            });
-          }}
-          title="Make an independent copy of this position to try a different line"
-        >
-          Duplicate
-        </Button>
+            <Typography
+              data-testid="lab-position-label"
+              variant="caption"
+              sx={{ color: "#333", whiteSpace: "nowrap" }}
+            >
+              {here ? here.label : ""}
+              {nodes.length > 1 ? ` (${nodeIdx + 1}/${nodes.length})` : ""}
+            </Typography>
 
-        <Button
-          data-testid="lab-save"
-          size="small"
-          variant="outlined"
-          disabled={busy}
-          onClick={() => {
-            const name = window.prompt("Save this position as", "");
-            if (name === null) return;
-            dispatch(labSavePosition({ gameID, name }));
-          }}
-        >
-          Save
-        </Button>
+            <Button
+              data-testid="lab-rename"
+              size="small"
+              variant="outlined"
+              disabled={busy}
+              onClick={() => {
+                const name = window.prompt(
+                  "Name for this branch",
+                  place.branchName,
+                );
+                if (name === null) return;
+                dispatch(
+                  labRenameBranch({
+                    gameID,
+                    branchID: String(place.branchID),
+                    name,
+                  }),
+                );
+              }}
+              title="Rename this branch"
+            >
+              Rename
+            </Button>
+
+            <Button
+              data-testid="lab-delete-branch"
+              size="small"
+              variant="outlined"
+              disabled={busy || branches.length < 2}
+              onClick={() => {
+                const other = branches.find((b) => b.id !== place.branchID);
+                if (!other) return;
+                const name = window.prompt(
+                  `Delete which branch? (${branches
+                    .filter((b) => b.id !== place.branchID)
+                    .map((b) => b.name)
+                    .join(", ")})`,
+                  other.name,
+                );
+                if (name === null) return;
+                const target = branches.find((b) => b.name === name.trim());
+                if (!target) {
+                  window.alert(`There is no branch called "${name}".`);
+                  return;
+                }
+                dispatch(
+                  labDeleteBranch({ gameID, branchID: String(target.id) }),
+                );
+              }}
+              title="Delete a branch other than this one"
+            >
+              Delete branch
+            </Button>
+          </>
+        )}
 
         <Button
           data-testid="lab-new"
@@ -189,9 +277,9 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
           onClick={() => {
             window.location.href = "../lab.php?newBoard=1";
           }}
-          title="Start again from an empty board"
+          title="Start a new scenario on an empty board"
         >
-          New
+          New scenario
         </Button>
 
         <Button size="small" onClick={() => setCollapsed(true)}>
@@ -279,8 +367,18 @@ const WDLabPanel: React.FC = function (): React.ReactElement | null {
       >
         {editing
           ? "Click a province to change what is on it. Nothing is enforced except the map itself: powers may have no units, and unit counts need not match centres."
-          : "Enter orders for every power, then press Resolve. Reset returns to the position from before the last adjudication."}
+          : "Enter orders for every power, then press Ready to adjudicate. Step back and adjudicate something else, and a new branch is started for it."}
       </Typography>
+
+      {lab.notice && (
+        <Typography
+          data-testid="lab-notice"
+          variant="caption"
+          sx={{ display: "block", mt: 0.5, color: "#060", fontWeight: 600 }}
+        >
+          {lab.notice}
+        </Typography>
+      )}
 
       {lab.error && (
         <Typography

@@ -5,7 +5,11 @@ import WDAds from "./components/ui/WDAds";
 import WDMain from "./components/ui/WDMain";
 import useAdPlacement from "./hooks/useAdPlacement";
 import { useAppDispatch } from "./state/hooks";
-import { gameApiSliceActions, loadGame } from "./state/game/game-api-slice";
+import {
+  gameApiSliceActions,
+  labLoadTree,
+  loadGame,
+} from "./state/game/game-api-slice";
 
 const App: React.FC = function (): React.ReactElement {
   const urlParams = new URLSearchParams(window.location.search);
@@ -17,9 +21,20 @@ const App: React.FC = function (): React.ReactElement {
   React.useEffect(() => {
     dispatch(loadGame(String(currentGameID)));
   }, [dispatch, currentGameID]);
+  // A branch that was just started says so on the way in, because starting one sends the browser
+  // to that branch's own board.
+  const newBranch = urlParams.get("newBranch");
   React.useEffect(() => {
     dispatch(gameApiSliceActions.labSetEnabled(isLab));
-  }, [dispatch, isLab]);
+    // The analysis this board belongs to lives on the server, so the navigation bar is drawn from
+    // what it says rather than from anything the browser has kept.
+    if (isLab && currentGameID)
+      dispatch(labLoadTree({ gameID: String(currentGameID) }));
+    if (isLab && newBranch)
+      dispatch(
+        gameApiSliceActions.labSetNotice(`New branch created: ${newBranch}`),
+      );
+  }, [dispatch, isLab, currentGameID, newBranch]);
   const adPlacement = useAdPlacement();
   return (
     <div className="App">

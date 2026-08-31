@@ -254,15 +254,16 @@ class libLabMode
 		if( in_array($script, self::$allowedScripts) ) return;
 
 		// The Lab is the board, so the root goes straight to it rather than to a list of
-		// positions. lab.php is still there for saving, loading and the rest.
+		// positions. lab.php is still there to start a new scenario and to export one.
 		if( $script === 'index.php' )
 		{
 			require_once(l_r('lib/lab.php'));
+			require_once(l_r('lib/labTree.php'));
 
 			if( !headers_sent() )
 			{
 				http_response_code(302);
-				header('Location: '.libLab::boardURL(libLab::currentOrNewGameID()));
+				header('Location: '.libLab::boardURL(libLabTree::currentOrNewGameID()));
 			}
 
 			die();

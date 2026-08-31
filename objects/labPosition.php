@@ -287,6 +287,22 @@ class LabPosition
 	public function season() { return ($this->turn % 2) ? 'Fall' : 'Spring'; }
 
 	/**
+	 * The year a turn number falls in.
+	 *
+	 * @param int $turn
+	 * @return int
+	 */
+	public static function yearFromTurn($turn) { return (int)floor((int)$turn/2) + 1901; }
+
+	/**
+	 * The season a turn number falls in.
+	 *
+	 * @param int $turn
+	 * @return string 'Spring' or 'Fall'
+	 */
+	public static function seasonFromTurn($turn) { return ((int)$turn % 2) ? 'Fall' : 'Spring'; }
+
+	/**
 	 * Convert a year and season into a webDiplomacy turn number.
 	 *
 	 * @param int $year
