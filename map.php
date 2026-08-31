@@ -190,17 +190,23 @@ elseif ( $mapType == 'json' )
 {
 	require_once(l_r('board/orders/jsonBoardData.php'));
 	
+	/*
+	 * Despite the name this is JavaScript, not JSON: getBoardTurnData() returns the source of a
+	 * loadBoardTurnData() function, and the board loads it with a <script> tag. It has to say so:
+	 * a browser sent X-Content-Type-Options: nosniff refuses to execute a script served as
+	 * text/plain, and the board is then left without any units on it.
+	 */
 	$jsonData = jsonBoardData::getBoardTurnData($Game->id);
 	if( !DONOTCACHE )
 	{
 		$filename=Game::mapFilename($Game->id, $turn, 'json');
 		file_put_contents($filename,  $jsonData);
-		libHTML::serveImage($filename, 'text/plain');
+		libHTML::serveImage($filename, 'text/javascript');
 	}
 	else
 	{
 		header('Content-Length: '.strlen($jsonData));
-		header('Content-Type: text/plain');
+		header('Content-Type: text/javascript');
 
 		print $jsonData;
 	}
